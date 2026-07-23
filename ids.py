@@ -40,6 +40,7 @@ from collections import deque, defaultdict
 from datetime import datetime
 from netshield.core.sliding_window import SW
 from netshield.config import ESIKLER, COOLDOWN
+from netshield.net.utils import is_private
 
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
@@ -82,8 +83,6 @@ def is_root():
     try:    return os.geteuid() == 0
     except: return False
 
-def is_private(ip):
-    return ip.startswith(("10.","192.168.","127.","172.16.","::1","fe80","0."))
 
 def now_str():
     return datetime.now().strftime("%H:%M:%S")
