@@ -39,6 +39,7 @@ import os, sys, json, time, queue, socket, threading, subprocess, urllib.request
 from collections import deque, defaultdict
 from datetime import datetime
 from netshield.core.sliding_window import SW
+from netshield.config import ESIKLER, COOLDOWN
 
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
