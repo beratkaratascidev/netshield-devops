@@ -22,7 +22,6 @@ from datetime import datetime
 
 def ts_str():
     return datetime.now().strftime("%H:%M:%S")
-HTTP_PORTS = {80, 443, 8000, 8080, 8443, 8888, 3000, 5000}
 
 class Motor:
     """
@@ -97,12 +96,24 @@ class Motor:
         src = pkt[IP].src
         ts = time.monotonic()
 
-        # Canlı trafik grafiğine paket bilgisini gönder
         self.q.put(("TRAFIK", 1))
 
-        # ICMP / Ping
+        print(
+            f"[CANLI] iface={getattr(pkt, 'sniffed_on', '?')} "
+            f"src={src} paket={pkt.summary()}",
+            flush=True
+        )
+
+        # ── ICMP (ping, flood) ─────────────
         if ICMP in pkt:
             n = self.sw_icmp.add(src, ts)
+
+            print(
+                f"[ICMP] src={src} n={n} "
+                f"eşik={self.esik['icmp_per_sec']}",
+                flush=True
+            )
+
             self._bildir(
                 src,
                 "ICMP",
@@ -110,69 +121,49 @@ class Motor:
                 ts,
                 flood=(n >= self.esik["icmp_per_sec"])
             )
+            
+            # Her ICMP paketi loglan (tekil)
+            self._bildir(src, "ICMP",
+                         f"type={pkt[ICMP].type} count={n}",
+                         ts, flood=(n >= self.esik["icmp_per_sec"]))
 
-        # TCP
+        # ── TCP ────────────────────────────
         if TCP in pkt:
-            fl = int(pkt[TCP].flags)
+            fl    = int(pkt[TCP].flags)
             dport = pkt[TCP].dport
 
-            # SYN paketi: SYN=1, ACK=0
+            # SYN paketi (SYN=1, ACK=0)
             if (fl & 0x02) and not (fl & 0x10):
                 n = self.sw_syn.add(src, ts)
-                self._bildir(
-                    src,
-                    "SYN",
-                    f"→:{dport} count={n}",
-                    ts,
-                    flood=(n >= self.esik["syn_per_sec"])
-                )
+                self._bildir(src, "SYN",
+                             f"→:{dport} count={n}",
+                             ts, flood=(n >= self.esik["syn_per_sec"]))
 
-            # HTTP trafiği
+            # HTTP
             if dport in HTTP_PORTS:
                 n = self.sw_http.add(src, ts)
                 if n >= self.esik["http_per_sec"]:
-                    self._bildir(
-                        src,
-                        "HTTP Flood",
-                        f"{n} istek/sn →:{dport}",
-                        ts,
-                        flood=True
-                    )
+                    self._bildir(src, "HTTP Flood",
+                                 f"{n} istek/sn →:{dport}",
+                                 ts, flood=True)
 
-            # TCP port tarama kontrolü
+            # Port tarama
             self._pt(src, dport, ts)
 
-        # UDP
+        # ── UDP ────────────────────────────
         if UDP in pkt:
             n = self.sw_udp.add(src, ts)
-            self._bildir(
-                src,
-                "UDP",
-                f"→:{pkt[UDP].dport} count={n}",
-                ts,
-                flood=(n >= self.esik["udp_per_sec"])
-            )
-
+            self._bildir(src, "UDP",
+                         f"→:{pkt[UDP].dport} count={n}",
+                         ts, flood=(n >= self.esik["udp_per_sec"]))
             self._pt(src, pkt[UDP].dport, ts)
 
-        # Eski sayaç kayıtlarını temizle
+        # Bellek temizle
         if ts - self._last_purge > 60:
-            for sw in (
-                self.sw_icmp,
-                self.sw_syn,
-                self.sw_udp,
-                self.sw_http
-            ):
+            for sw in (self.sw_icmp,self.sw_syn,self.sw_udp,self.sw_http):
                 sw.purge()
-
-            dead = [
-                key for key, value in self._cd.items()
-                if ts - value > 300
-            ]
-
-            for key in dead:
-                del self._cd[key]
-
+            dead = [k for k,v in self._cd.items() if ts-v>300]
+            for k in dead: del self._cd[k]
             self._last_purge = ts
 
     # ── Port tarama ────────────────────────
