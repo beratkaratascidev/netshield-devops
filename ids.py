@@ -38,6 +38,7 @@ Test (başka terminalden):
 import os, sys, json, time, queue, socket, threading, subprocess, urllib.request
 from collections import deque, defaultdict
 from datetime import datetime
+from netshield.core.sliding_window import SW
 
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
@@ -92,30 +93,7 @@ def ts_str():
 # ══════════════════════════════════════════
 #  SLIDING WINDOW
 # ══════════════════════════════════════════
-class SW:
-    def __init__(self, window=1.0):
-        self.w = window
-        self._d = defaultdict(deque)
 
-    def add(self, ip, ts=None):
-        if ts is None: ts = time.monotonic()
-        d = self._d[ip]
-        d.append(ts)
-        c = ts - self.w
-        while d and d[0] < c: d.popleft()
-        return len(d)
-
-    def count(self, ip):
-        ts = time.monotonic()
-        d  = self._d[ip]
-        c  = ts - self.w
-        while d and d[0] < c: d.popleft()
-        return len(d)
-
-    def purge(self):
-        now = time.monotonic()
-        for ip in [k for k,d in self._d.items() if not d or now-d[-1]>120]:
-            del self._d[ip]
 
 # ══════════════════════════════════════════
 #  TESPİT MOTORU
