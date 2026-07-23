@@ -7,7 +7,7 @@ from datetime import datetime
 from netshield.core.sliding_window import SW
 from netshield.config import ESIKLER, COOLDOWN
 from netshield.net.utils import is_private
-from netshield.core.motor import Motor
+from netshield.core.motor import Motor, geo_lookup
 
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox

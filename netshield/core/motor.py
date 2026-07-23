@@ -18,7 +18,10 @@ except ImportError:
 from netshield.core.sliding_window import SW
 from netshield.config import COOLDOWN
 from netshield.net.utils import is_private, is_root
+from datetime import datetime
 
+def ts_str():
+    return datetime.now().strftime("%H:%M:%S")
 
 class Motor:
     """
@@ -156,23 +159,28 @@ class Motor:
             d.clear(); s.clear()
 
     # ── Bildirim (cooldown korumalı) ───────
+       # ── Bildirim (cooldown korumalı) ───────
     def _bildir(self, ip, tur, detay, ts, flood=False):
-        # Cooldown: aynı IP+tür için 1sn'de bir bildirim
-        key  = (ip, tur)
+        tip = "FLOOD" if flood else "PAKET"
+
+        # Normal paket ve flood bildirimleri birbirini engellemesin
+        key = (ip, tur, tip)
+
         last = self._cd.get(key, 0.0)
         if ts - last < COOLDOWN:
             return
+
         self._cd[key] = ts
 
-        tip = "FLOOD" if flood else "PAKET"
-        self.q.put(("OLAY", {
-            "ts":    ts_str(),
-            "ip":    ip,
-            "tur":   tur,
+        olay = {
+            "ts": ts_str(),
+            "ip": ip,
+            "tur": tur,
             "detay": detay,
-            "tip":   tip,
-        }))
+            "tip": tip,
+        }
 
+        self.q.put(("OLAY", olay))
     # ── Simülasyon ─────────────────────────
     def _sim(self):
         import random
