@@ -7,7 +7,8 @@ from datetime import datetime
 from netshield.core.sliding_window import SW
 from netshield.config import ESIKLER
 from netshield.net.utils import is_private
-from netshield.core.motor import Motor, geo_lookup
+from netshield.core.motor import Motor
+from netshield.net.utils import geo_lookup
 
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
@@ -31,8 +32,6 @@ except Exception:
 #  SABİTLER
 # ══════════════════════════════════════════
 TITLE    = " DDO IDS "
-GEO_URL  = "http://ip-api.com/json/{ip}?fields=status,country,city,isp"
-
 def is_root():
     try:    return os.geteuid() == 0
     except: return False

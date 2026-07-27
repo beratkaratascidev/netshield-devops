@@ -1,7 +1,6 @@
 import time
 import queue
 import threading
-import urllib.request
 
 from collections import deque, defaultdict
 try:
@@ -17,7 +16,7 @@ except ImportError:
 
 from netshield.core.sliding_window import SW
 from netshield.config import COOLDOWN, HTTP_PORTS
-from netshield.net.utils import is_private, is_root
+from netshield.net.utils import is_root
 from datetime import datetime
 
 def ts_str():
@@ -279,35 +278,4 @@ class Motor:
             else:
                 self.q.put(("TRAFIK", rng.randint(1,10)))
 
-# ══════════════════════════════════════════
-#  GEO-IP (cache + sadece 1 istek/IP)
-# ══════════════════════════════════════════
-_geo_cache: dict = {}
-_geo_lock = threading.Lock()
 
-def geo_lookup(ip, q):
-    with _geo_lock:
-        if ip in _geo_cache:
-            q.put(("GEO", ip, _geo_cache[ip]))
-            return
-    if is_private(ip):
-        geo = {"country":"Yerel Ağ","city":"-","isp":"-"}
-        with _geo_lock: _geo_cache[ip] = geo
-        q.put(("GEO", ip, geo)); return
-    try:
-        with urllib.request.urlopen(GEO_URL.format(ip=ip), timeout=4) as r:
-            d = json.loads(r.read())
-        if d.get("status") == "success":
-            geo = {"country": d.get("country","?"),
-                   "city":    d.get("city","?"),
-                   "isp":     d.get("isp","?")}
-        else:
-            geo = {"country":"?","city":"-","isp":"-"}
-    except:
-        geo = {"country":"Zaman aşımı","city":"-","isp":"-"}
-    with _geo_lock: _geo_cache[ip] = geo
-    q.put(("GEO", ip, geo))
-
-# ══════════════════════════════════════════
-#  GUI — sade, terminal hissiyatlı
-# ══════════════════════════════════════════
