@@ -16,13 +16,12 @@ except ImportError:
         return []
 
 from netshield.core.sliding_window import SW
-from netshield.config import COOLDOWN
+from netshield.config import COOLDOWN, HTTP_PORTS
 from netshield.net.utils import is_private, is_root
 from datetime import datetime
 
 def ts_str():
     return datetime.now().strftime("%H:%M:%S")
-HTTP_PORTS = {80, 443, 8000, 8080, 8443, 8888, 3000, 5000}
 
 class Motor:
     """

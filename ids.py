@@ -5,7 +5,7 @@ import os, sys, json, time, queue, socket, threading, subprocess, urllib.request
 from collections import deque, defaultdict
 from datetime import datetime
 from netshield.core.sliding_window import SW
-from netshield.config import ESIKLER, COOLDOWN
+from netshield.config import ESIKLER
 from netshield.net.utils import is_private
 from netshield.core.motor import Motor, geo_lookup
 
@@ -32,19 +32,6 @@ except Exception:
 # ══════════════════════════════════════════
 TITLE    = " DDO IDS "
 GEO_URL  = "http://ip-api.com/json/{ip}?fields=status,country,city,isp"
-HTTP_PORTS = {80,443,8000,8080,8443,8888,3000,5000}
-
-# Varsayılan eşikler — kasıtlı düşük (gerçek trafik tespit edilsin)
-ESIKLER = {
-    "icmp_per_sec":  5,    # ping -f kolayca aşar
-    "syn_per_sec":  10,
-    "udp_per_sec":  10,
-    "http_per_sec": 20,
-    "port_scan":     4,    # 4 farklı port = şüpheli
-    "port_win":      5,    # 5 saniyelik pencere
-}
-
-COOLDOWN = 1.0   # aynı IP+tür için bildirim aralığı (sn)
 
 def is_root():
     try:    return os.geteuid() == 0
