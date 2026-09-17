@@ -6,34 +6,11 @@ from netshield.core.filters import compile_filter
 from netshield.core.motor import get_if_list, SCAPY_OK
 from netshield.net.utils import is_root
 
-BG = '#101722'
-SURF = '#151f2d'
-CARD = '#1b2839'
-BRD = '#2c3c51'
-ACC = '#65b7ff'
-GRN = '#65dbb0'
-RED = '#ff7f91'
-YLW = '#edca80'
-PRP = '#bba8ff'
-TXT = '#dce6f2'
-MUT = '#94a6bc'
-WHT = '#ffffff'
-
-TUR_RENK = {'ICMP': YLW, 'SYN': RED, 'UDP': PRP, 'HTTP Flood': GRN,
-            'ACK Flood': ACC, 'RST Flood': RED, 'DNS Flood': YLW,
-            'Port Tarama': '#f5ac77', 'Dağıtık Flood Şüphesi': RED}
-
-THRESHOLD_LABELS = {
-    'icmp_per_sec': 'ICMP echo / sn', 'syn_per_sec': 'TCP SYN / sn',
-    'udp_per_sec': 'UDP / sn', 'http_per_sec': 'HTTP/1 istek / sn',
-    'ack_per_sec': 'Saf TCP ACK / sn', 'rst_per_sec': 'TCP RST / sn',
-    'dns_per_sec': 'DNS sorgu / sn', 'port_scan': 'Farklı hedef port',
-    'port_win': 'Port tarama penceresi (sn)', 'target_per_sec': 'Hedef toplam paket / sn',
-    'target_sources': 'Hedefe gelen farklı kaynak',
-}
+from netshield.ui.theme import (BG, SURF, CARD, BRD, ACC, GRN, RED, YLW, PRP, TXT, MUT, WHT, TUR_RENK, THRESHOLD_LABELS)
+from netshield.ui.panels import AnalysisPanels
 
 
-class WorkspaceUI:
+class WorkspaceUI(AnalysisPanels):
     def _button(self, parent, text, command, primary=False):
         button = tk.Button(parent, text=text, command=command, relief='flat', bd=0,
                            bg=ACC if primary else CARD, fg=BG if primary else TXT, highlightthickness=0,
@@ -86,6 +63,7 @@ class WorkspaceUI:
         self._capture_btn = self._button(toolbar, '■ Durdur', self._toggle_capture, primary=True)
         self._capture_btn.pack(side='left')
         self._button(toolbar, 'Eşikler', self._thresholds).pack(side='left', padx=8)
+        self._button(toolbar, 'Ayarlar', self._preferences).pack(side='left')
         self._button(toolbar, 'JSON dışa aktar', self._export).pack(side='right', padx=(8, 0))
         self._button(toolbar, 'HTML rapor', self._rapor).pack(side='right', padx=(8, 0))
         self._button(toolbar, 'Görünümü temizle', self._sifirla).pack(side='right')
@@ -118,6 +96,7 @@ class WorkspaceUI:
         filterbar.pack(fill='x')
         self._filter_text = tk.StringVar()
         entry = ttk.Entry(filterbar, textvariable=self._filter_text)
+        self._filter_entry = entry
         entry.pack(side='left', fill='x', expand=True)
         entry.bind('<Return>', lambda _: self._filtre_uygula())
         self._protocol = tk.StringVar(value='Tümü')
@@ -145,13 +124,14 @@ class WorkspaceUI:
         self._notebook.add(log_page, text='Sistem günlüğü')
         self._packet_tree = self._table(packet_page, [
             ('id', 'No.', 55), ('ts', 'Zaman', 110), ('src', 'Kaynak', 140),
-            ('dst', 'Hedef', 140), ('proto', 'Protokol', 75), ('length', 'Bayt', 55), ('info', 'Bilgi', 310)])
+            ('dst', 'Hedef', 140), ('proto', 'Protokol', 75), ('mode', 'Mod', 80), ('length', 'Bayt', 55), ('info', 'Bilgi', 310)])
         for protocol_name, color in {'TCP': ACC, 'UDP': PRP, 'DNS': YLW, 'HTTP': GRN,
                                      'ICMP': '#f5ac77', 'ARP': '#91d0cb', 'IPv6': MUT}.items():
             self._packet_tree.tag_configure(protocol_name, foreground=color)
         self._packet_tree.bind('<<TreeviewSelect>>', self._packet_selected)
+        self._build_alarm_tools(alert_page)
         self._alert_tree = self._table(alert_page, [
-            ('ts', 'Zaman', 110), ('severity', 'Önem', 70), ('tur', 'Tespit', 155),
+            ('ts', 'Zaman', 110), ('review', 'İnceleme', 90), ('severity', 'Önem', 70), ('tur', 'Tespit', 155),
             ('ip', 'Kaynak', 140), ('dst', 'Hedef', 140), ('detay', 'Ölçüm / eşik', 330)])
         self._alert_tree.tag_configure('Yüksek', foreground=YLW)
         self._alert_tree.tag_configure('Kritik', foreground=RED)
@@ -199,6 +179,9 @@ class WorkspaceUI:
         self._status = tk.Label(self.root, bg=BG, fg=MUT, anchor='w', padx=18, pady=10,
                                 text='Hazır', font=('DejaVu Sans', 8))
         self._status.pack(side='bottom', fill='x', before=main)
+        self._main, self._sidebar = main, sidebar
+        self._vertical, self._inspector = vertical, inspector
+        self._build_analysis_panels()
 
     def _kart(self, parent, label, value, color):
         frame = tk.Frame(parent, bg=SURF, padx=15, pady=11)
@@ -213,7 +196,7 @@ class WorkspaceUI:
         frame.pack(fill='both', expand=True)
         tree = ttk.Treeview(frame, columns=[c[0] for c in columns], show='headings', selectmode='browse')
         for key, title, width in columns:
-            tree.heading(key, text=title)
+            tree.heading(key, text=title, command=lambda column=key: self._sort_table(tree, column))
             tree.column(key, width=width, minwidth=45, stretch=key == columns[-1][0])
         ybar = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)
         xbar = ttk.Scrollbar(frame, orient='horizontal', command=tree.xview)
@@ -248,7 +231,7 @@ class WorkspaceUI:
     def _insert_packet(self, key, packet):
         if self._matches(packet):
             fields = ('ui_id', 'ts', 'src', 'dst', 'proto', 'length', 'info')
-            self._packet_tree.insert('', 'end', iid=key, values=[packet.get(f, '') for f in fields],
+            self._packet_tree.insert('', 'end', iid=key, values=[packet.get(f, '') for f in fields[:5]] + ['Simülasyon' if packet.get('simulated') else 'Canlı'] + [packet.get(f, '') for f in fields[5:]],
                                       tags=(packet['proto'],))
 
     def _filtre_uygula(self):
@@ -264,6 +247,7 @@ class WorkspaceUI:
             self._packet_tree.delete(*children)
         for key, packet in self._packets.items():
             self._insert_packet(key, packet)
+        self._apply_table_order(self._packet_tree)
         self._filter_status.configure(text=f'{len(self._packet_tree.get_children())} / {len(self._packets)} paket eşleşiyor · Filtre yalnızca paket görünümünü etkiler', fg=GRN)
 
     def _show_details(self, text):
@@ -309,6 +293,15 @@ class WorkspaceUI:
             value = tk.StringVar(value=str(self.esik[key]))
             ttk.Entry(win, textvariable=value, width=12).grid(row=row, column=1, padx=16)
             entries[key] = value
+        preset = tk.StringVar(value='Profil seç')
+        presets = ttk.Combobox(win, textvariable=preset, state='readonly', values=['Hassas', 'Dengeli', 'Yoğun ağ'])
+        presets.grid(row=len(entries), column=0, columnspan=2, pady=8)
+        def apply_profile(_):
+            from netshield.config import ESIKLER
+            factor = {'Hassas': 0.5, 'Dengeli': 1, 'Yoğun ağ': 4}[preset.get()]
+            for key, value in entries.items():
+                value.set(str(max(1, int(ESIKLER[key] * factor)) if key.endswith('_per_sec') else ESIKLER[key]))
+        presets.bind('<<ComboboxSelected>>', apply_profile)
         def save():
             try:
                 values = {key: int(value.get()) for key, value in entries.items()}
@@ -319,10 +312,12 @@ class WorkspaceUI:
             except ValueError:
                 messagebox.showerror('Geçersiz eşik', 'Pozitif tam sayı girin (en çok 1.000.000).\nPort ve kaynak sayısı en çok 1024 olabilir.', parent=win)
                 return
+            if not self._commit_preferences(thresholds=values):
+                return
             self.esik.update(values)
             self._syslog('SİSTEM', 'Eşikler güncellendi; bir sonraki yakalamada uygulanacak.')
             win.destroy()
-        self._button(win, 'Kaydet', save, True).grid(row=len(entries), column=0, columnspan=2, pady=14)
+        self._button(win, 'Kaydet', save, True).grid(row=len(entries)+1, column=0, columnspan=2, pady=14)
 
     def _export(self):
         path = filedialog.asksaveasfilename(parent=self.root, title='Oturumu dışa aktar',

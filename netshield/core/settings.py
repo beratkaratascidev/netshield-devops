@@ -1,0 +1,59 @@
+"""Validated user preferences, written atomically without traffic data."""
+import json
+import os
+import tempfile
+import ipaddress
+from pathlib import Path
+from netshield.config import ESIKLER
+
+
+def default_path():
+    return Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'netshield' / 'settings.json'
+
+
+def validate_settings(data):
+    if not isinstance(data, dict):
+        raise ValueError('Ayar dosyası bir JSON nesnesi olmalı.')
+    thresholds = {**ESIKLER, **data.get('thresholds', {})}
+    for key in ESIKLER:
+        value = thresholds[key]
+        maximum = 1024 if key in ('port_scan', 'target_sources') else 1000000
+        if type(value) is not int or not 1 <= value <= maximum:
+            raise ValueError(f'Geçersiz eşik: {key}')
+    density = data.get('density', 'Rahat')
+    if density not in ('Rahat', 'Kompakt'):
+        raise ValueError('Geçersiz tablo yoğunluğu.')
+    watchlist = data.get('watchlist', [])
+    if not isinstance(watchlist, list) or len(watchlist) > 100 or any(not isinstance(ip, str) for ip in watchlist):
+        raise ValueError('En fazla 100 adres takip edilebilir.')
+    watched = list(dict.fromkeys(str(ipaddress.ip_address(ip)) for ip in watchlist))
+    return dict(version=1, thresholds={k: thresholds[k] for k in ESIKLER},
+                density=density, watchlist=watched)
+
+
+def load_settings(path):
+    try:
+        with Path(path).open(encoding='utf-8') as source:
+            return validate_settings(json.load(source)), None
+    except FileNotFoundError:
+        return validate_settings({}), None
+    except (OSError, ValueError, TypeError) as exc:
+        return validate_settings({}), f'Ayarlar okunamadı; varsayılanlar kullanılıyor: {exc}'
+
+
+def save_settings(path, data):
+    data = validate_settings(data)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
+                                         prefix='.settings-', delete=False) as output:
+            temporary = Path(output.name)
+            json.dump(data, output, ensure_ascii=False, indent=2)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)

@@ -16,6 +16,8 @@ class AppTests(unittest.TestCase):
         self.app = ids.App.__new__(ids.App)
         self.app.banned = {}
         self.app._closed = False
+        self.app._refresh_tracking = Mock()
+        self.app._resort_tables = Mock()
         self.app._autoscroll = Mock()
         self.app._autoscroll.get.return_value = False
         self.app.motor = motor.Motor(queue.Queue(), dict(ESIKLER))

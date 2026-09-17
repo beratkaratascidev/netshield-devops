@@ -17,13 +17,15 @@ class WorkspaceTests(unittest.TestCase):
     def setUp(self):
         self.root = tk.Tk()
         self.root.withdraw()
-        self.app = ids.App(self.root, autostart=False)
+        self.settings_dir = tempfile.TemporaryDirectory()
+        self.app = ids.App(self.root, autostart=False, settings_path=Path(self.settings_dir.name) / 'settings.json')
         self.app.motor = Motor(self.app.q, ESIKLER, simulation=True)
         self.errors = []
         self.root.report_callback_exception = lambda *args: self.errors.append(args)
 
     def tearDown(self):
         self.app.kapat()
+        self.settings_dir.cleanup()
         self.assertEqual(self.errors, [])
 
     def test_packet_selection_filter_alarm_and_export(self):
@@ -65,6 +67,101 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(a._packet_tree.get_children(), ())
         self.assertEqual(a._alert_tree.get_children(), ())
         self.assertEqual(a.olaylar, [])
+
+    def test_tracking_watchlist_and_bidirectional_follow(self):
+        a = self.app
+        p = dict(ts='12:00:00', src='192.168.1.10', dst='192.168.1.20',
+                 sport=50000, dport=443, transport='TCP', proto='TCP', length=60, info='test')
+        a._on_packet(dict(p))
+        a._on_packet(dict(p, src=p['dst'], dst=p['src'], sport=443, dport=50000))
+        a._on_packet(dict(p, sport=443, dport=50000))
+        a._watch_ip('192.168.1.99')
+        a._notebook.select(a._tracking_page)
+        a._refresh_tracking()
+        self.assertEqual(len(a._host_tree.get_children()), 3)
+        self.assertEqual(a._watch_tree.get_children(), ('192.168.1.99',))
+        self.assertEqual(len(a._flow_tree.get_children()), 2)
+        key = next(key for key, flow in a._flow_rows.items() if flow['packets'] == 2)
+        a._flow_tree.selection_set(key)
+        a._follow_flow()
+        self.assertEqual(a._packet_tree.get_children(), ('1', '2'))
+        self.assertIn('192.168.1.99', json.loads(Path(a.settings_path).read_text())['watchlist'])
+
+    def test_tracking_can_exclude_demo_records(self):
+        a = self.app
+        packet = dict(ts='12:00:00', src='192.0.2.1', dst='192.0.2.2', sport=1000,
+                      dport=80, transport='TCP', proto='TCP', length=60, info='test')
+        a._on_packet(dict(packet, simulated=True))
+        a._on_packet(dict(packet, src='192.0.2.3', simulated=False))
+        a._notebook.select(a._tracking_page)
+        a._tracking_scope.set('Canlı')
+        a._change_tracking_scope()
+        self.assertNotIn('192.0.2.1', a._host_tree.get_children())
+        self.assertIn('192.0.2.3', a._host_tree.get_children())
+        self.assertEqual(a._packet_tree.set('1', 'mode'), 'Simülasyon')
+        self.assertEqual(a._packet_tree.set('2', 'mode'), 'Canlı')
+        a._host_tree.selection_set('192.0.2.3')
+        a._follow_host(a._host_tree)
+        self.assertEqual(a._packet_tree.get_children(), ('2',))
+        self.assertIn('mode=live', a._filter_text.get())
+
+    def test_alarm_review_filters_and_hidden_record_eviction(self):
+        a = self.app
+        event = dict(ts='12:00:00', ip='192.0.2.1', dst='192.0.2.2', tip='FLOOD',
+                     tur='SYN', severity='Yüksek', detay='test')
+        a._on_olay(event)
+        a._alert_tree.selection_set('1')
+        a._toggle_review()
+        self.assertTrue(a.olaylar[0]['reviewed'])
+        a._alarm_review.set('Yeni')
+        a._refresh_alerts()
+        self.assertEqual(a._alert_tree.get_children(), ())
+        with patch.object(ids, 'ALERT_HISTORY', 2):
+            a._on_olay(event)
+            a._on_olay(event)
+        self.assertEqual(a._alert_tree.get_children(), ('2', '3'))
+        a._alarm_level.set('Kritik')
+        a._refresh_alerts()
+        self.assertEqual(a._alert_tree.get_children(), ())
+
+    def test_numeric_sort_persists_and_panels_can_be_hidden(self):
+        a = self.app
+        p = dict(ts='12:00:00', src='192.0.2.1', dst='192.0.2.2', transport='UDP', proto='UDP', info='test')
+        for length in (9, 100, 2):
+            a._on_packet(dict(p, length=length))
+        a._sort_table(a._packet_tree, 'length')
+        self.assertEqual(a._packet_tree.get_children(), ('2', '1', '3'))
+        self.assertFalse(a._autoscroll.get())
+        a._on_packet(dict(p, length=200))
+        a._resort_tables()
+        self.assertEqual(a._packet_tree.get_children()[0], '4')
+        a._sidebar_visible.set(False)
+        a._toggle_sidebar()
+        self.assertNotIn(str(a._sidebar), tuple(map(str, a._main.panes())))
+        a._sidebar_visible.set(True)
+        a._toggle_sidebar()
+        self.assertIn(str(a._sidebar), tuple(map(str, a._main.panes())))
+        before = dict(a.preferences)
+        with patch('netshield.ui.panels.save_settings', side_effect=OSError('read-only')), \
+                patch('netshield.ui.panels.messagebox.showerror'):
+            self.assertFalse(a._commit_preferences(density='Kompakt'))
+        self.assertEqual(a.preferences, before)
+
+    def test_threshold_profile_is_saved_and_applied_next_start(self):
+        from tkinter import ttk
+        a = self.app
+        a._thresholds()
+        dialog = next(child for child in self.root.winfo_children() if isinstance(child, tk.Toplevel))
+        combo = next(child for child in dialog.winfo_children() if isinstance(child, ttk.Combobox))
+        combo.set('Yoğun ağ')
+        combo.event_generate('<<ComboboxSelected>>')
+        self.root.update()
+        save = next(child for child in dialog.winfo_children() if isinstance(child, tk.Button) and child.cget('text') == 'Kaydet')
+        save.invoke()
+        self.assertEqual(a.esik['syn_per_sec'], ESIKLER['syn_per_sec'] * 4)
+        stored = json.loads(Path(a.settings_path).read_text())
+        self.assertEqual(stored['thresholds']['syn_per_sec'], a.esik['syn_per_sec'])
+        self.assertEqual(a.motor.esik['syn_per_sec'], ESIKLER['syn_per_sec'])
 
     def test_status_and_controls_fit_supported_window_sizes(self):
         self.root.deiconify()

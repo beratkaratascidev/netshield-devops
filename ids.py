@@ -13,6 +13,7 @@ from tkinter import messagebox
 from netshield.config import ESIKLER, PACKET_HISTORY, ALERT_HISTORY
 from netshield.core.motor import Motor, SCAPY_OK
 from netshield.core.filters import compile_filter
+from netshield.core.settings import default_path, load_settings
 from netshield.net.utils import is_root, get_cached_geo
 from netshield.ui.workspace import WorkspaceUI, BG, SURF, CARD, ACC, GRN, RED, YLW, TXT, MUT, WHT
 
@@ -24,14 +25,16 @@ def now_str():
 
 
 class App(WorkspaceUI):
-    def __init__(self, root, autostart=True):
+    def __init__(self, root, autostart=True, settings_path=None):
         self.root = root
         root.title(TITLE)
         root.geometry('1440x920')
         root.minsize(1200, 820)
         root.configure(bg=BG)
         self.q = queue.Queue(maxsize=4096)
-        self.esik = dict(ESIKLER)
+        self.settings_path = settings_path or default_path()
+        self.preferences, settings_error = load_settings(self.settings_path)
+        self.esik = dict(self.preferences['thresholds'])
         self.motor = None
         self.banned = {}
         self.olaylar = []
@@ -47,6 +50,8 @@ class App(WorkspaceUI):
         self._closed = False
         self._after_id = None
         self._build()
+        if settings_error:
+            self._syslog('HATA', settings_error)
         if autostart:
             self._motor_baslat()
             self._poll()
@@ -102,6 +107,8 @@ class App(WorkspaceUI):
             self._traffic_count = 0
             self._traffic_since = now
             self._grafik_ciz()
+            self._refresh_tracking()
+            self._resort_tables()
         self._guncelle()
         if self._autoscroll.get():
             for tree in (self._packet_tree, self._alert_tree):
@@ -111,6 +118,7 @@ class App(WorkspaceUI):
         self._after_id = self.root.after(100, self._poll)
 
     def _on_packet(self, packet):
+        self._tracking_dirty = True
         self._packet_sequence += 1
         key = str(self._packet_sequence)
         packet['ui_id'] = self._packet_sequence
@@ -122,6 +130,7 @@ class App(WorkspaceUI):
         self._insert_packet(key, packet)
 
     def _on_olay(self, event):
+        self._tracking_dirty = True
         self.sayac['toplam'] += 1
         self.sayac[event['tip']] += 1
         self.sayac[event['tur']] += 1
@@ -130,10 +139,9 @@ class App(WorkspaceUI):
         self.olaylar.append(event)
         if len(self.olaylar) > ALERT_HISTORY:
             old = self.olaylar.pop(0)
-            self._alert_tree.delete(str(old['id']))
-        self._alert_tree.insert('', 'end', iid=str(event['id']),
-                                values=[event.get(k, '') for k in ('ts', 'severity', 'tur', 'ip', 'dst', 'detay')],
-                                tags=(event.get('severity', 'Yüksek'),))
+            if self._alert_tree.exists(str(old['id'])):
+                self._alert_tree.delete(str(old['id']))
+        self._insert_alert(event)
 
     def _guncelle(self):
         self._k_toplam.configure(text=str(len(self.olaylar)))
@@ -170,6 +178,7 @@ class App(WorkspaceUI):
     def _sifirla(self):
         if not messagebox.askyesno('Görünümü temizle', 'Paket ve alarm geçmişi temizlensin mi? Ban kuralları korunur.', parent=self.root):
             return
+        self._tracking_dirty = True
         self._packets.clear()
         self.olaylar.clear()
         self.sayac.clear()
@@ -191,6 +200,7 @@ class App(WorkspaceUI):
         self._log.configure(state='disabled')
         self._show_details('Görünüm temizlendi. Bir paket veya alarm seçin.')
         self._grafik_ciz()
+        self._refresh_tracking()
         self._syslog('SİSTEM', 'Görünüm temizlendi; tespit pencereleri ve ban kuralları korundu.')
 
     def kapat(self):

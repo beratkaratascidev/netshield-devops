@@ -2,7 +2,7 @@
 
 Türkçe, koyu temalı Tkinter masaüstü uygulaması. Seçilen ağ arayüzündeki
 paketleri listeler; hız ve port çeşitliliği eşiklerine göre şüpheli trafik
-alarmları üretir. Wireshark benzeri paket listesi ve ayrıntı düzeni sunar;
+alarmları üretir. Cihaz/bağlantı takibi ve alarm inceleme araçları içerir. Wireshark benzeri paket listesi ve ayrıntı düzeni sunar;
 Wireshark'ın tüm protokol çözümleyicilerini veya filtre dilini içermez.
 
 ## Çalıştırma
@@ -40,7 +40,8 @@ switch üzerinde port aynalama/SPAN, bir TAP veya ilgili ağ geçidinden
 - **Alarmlar:** Kaynak, hedef, tespit türü, önem ve ölçüm penceresi.
 - **Akışı izle:** Otomatik kaydırmayı kapatarak eski kayıtları inceleyin.
 - **Eşikler:** Yakalama durdurulunca değiştirilebilir. Sonraki başlatmada
-  uygulanır; uygulama kapanınca varsayılanlara döner.
+  uygulanır ve kullanıcı ayarlarına kaydedilir. Hassas, Dengeli ve Yoğun ağ
+  profilleri başlangıç noktası sağlar; bunlar otomatik öğrenilen eşikler değildir.
 - **JSON dışa aktar:** Bellekteki paket önizlemeleri, alarmlar ve eşikler.
   Tam PCAP kaydı değildir. Filtre yalnızca görünümü etkiler; dışa aktarım
   bellekteki bütün kayıtları içerir.
@@ -55,9 +56,10 @@ info="GET /"
 192.168.1.10
 ```
 
-Alanlar: `src`, `dst`, `proto`, `port`, `info`. Birden fazla koşul **VE**
-olarak birleştirilir. Adres ve metin koşulları alt metin arar; CIDR desteği
-yoktur. `proto=TCP`, TCP üzerinde çözümlenen HTTP ve DNS kayıtlarını da
+Alanlar: `src`, `dst`, `ip`, `proto`, `port`, `sport`, `dport`, `info`. Birden fazla
+koşul **VE** olarak birleştirilir. `ip=192.168.1.10` iki uçta tam IP eşleşmesi;
+`ip=192.168.1.0/24` veya `src=2001:db8::/32` CIDR ağ eşleşmesi yapar. CIDR
+içermeyen `src`/`dst` ve metin koşulları alt metin aramaya devam eder. `proto=TCP`, TCP üzerinde çözümlenen HTTP ve DNS kayıtlarını da
 kapsar. Port hem kaynakta hem hedefte aranır. Geçersiz filtre, önceki geçerli
 filtrenin yerine uygulanmaz. Filtreler alarm üretimini durdurmaz.
 
@@ -116,3 +118,50 @@ Testler tespit eşiklerini, yanlış alarm ayrımlarını, filtreleri, kuyruk
 sınırlarını, Scapy paket çözümlemesini ve firewall hata davranışlarını sınar.
 Ekran varsa Tkinter arayüz testleri de çalışır. Gerçek paket gönderimi veya
 firewall değişikliği yapılmaz; canlı yakalama testleri taklit edilir.
+
+## Takip ve inceleme çalışma alanı
+
+**Cihazlar ve bağlantılar** sekmesi, bellekteki son 2000 paket önizlemesinden
+IP başına gönderilen/alınan paketleri, bayt miktarını ve son görülme saatini
+hesaplar. Panelde Tüm modlar/Canlı/Simülasyon seçilerek yalnızca ilgili
+kayıtlar incelenebilir. Paket tablosundaki Mod sütunu da sentetik kayıtları
+belirtir; `mode=live` ve `mode=demo` görüntüleme filtreleri desteklenir.
+İlişkili alarm sayısı son 2000 alarmdan hesaplanır; iki geçmişin zaman
+aralığı aynı olmak zorunda değildir. Bunlar oturum toplamı veya tüm ağ envanteri
+değildir. Önizleme taşması varsa takip tablosu yakalanan tüm paketleri kapsamaz.
+
+- **Cihazlar:** Bir IP'ye çift tıklamak o IP'nin paketlerini filtreler.
+- **Bağlantılar:** Protokol ve IP/port uçlarıyla iki yön birleştirilir. Çift
+  tıklamak tam uç eşleşmeli `flow=` filtresi oluşturur. TCP akış birleştirme
+  veya bağlantı kurulmuş olduğuna dair doğrulama yapılmaz.
+- **Takip listem:** Trafiği görünmeyen sabitlenmiş IP'ler de sıfır sayaçla
+  görünür. IP eklemek ağ taraması başlatmaz, alarmları susturmaz veya erişim
+  izni vermez.
+- **Alarmlar:** Önem, tespit türü ve Yeni/İncelendi filtreleri vardır.
+  İncelendi işareti aynı kayıtta geri alınabilir; sonraki alarmları engellemez.
+  JSON çıktısı bu işareti içerir.
+- **Sağ tık:** Paket tablosundan kaynak/hedef IP'yi filtreleyin, bağlantıyı
+  izleyin, IP'yi takibe ekleyin veya paket özetini kopyalayın.
+- **Sütun başlıkları:** Sayısal sütunlar sayısal olarak sıralanır; yeniden
+  tıklamak yönü değiştirir. Sıralama otomatik kaydırmayı kapatır. Akan paketlerin
+  sıralaması saniyelik yenilemede uygulanır.
+
+### Görünüm ve ayarlar
+
+Üstteki **Çalışma alanı** menüsünde görünüm/IP takip ayarları, eşik profilleri
+ve durdurulmuş yakalama için arayüz listesini yenileme bulunur. **Görünüm**
+menüsünden sağ panel ve paket ayrıntıları gizlenebilir. Rahat/Kompakt tablo
+satır yoğunluğu seçilebilir.
+
+Eşikler, satır yoğunluğu ve en fazla 100 takip IP'si
+`$XDG_CONFIG_HOME/netshield/settings.json` konumunda; değişken tanımlı değilse
+`~/.config/netshield/settings.json` konumunda saklanır. Dosya atomik olarak
+değiştirilir; bozuk dosyada varsayılanlar yüklenir ve günlükte neden belirtilir.
+Paketler, alarm geçmişi, inceleme işaretleri, sıralama ve panel yerleşimi
+uygulama kapanınca saklanmaz. Root ile açılan uygulama farklı kullanıcı ayar
+konumunu kullanabilir. Görünüm tercihleri çalışan yakalamayı değiştirmez;
+eşiklerin etkinleşmesi için yeniden başlatma gerekir.
+
+Kısayollar: **Ctrl+F** filtreye odaklanır; filtrede **Enter** uygular,
+**Esc** temizler; **Ctrl+E** JSON dışa aktarır; paket tablosunda **Ctrl+C**
+seçili özeti kopyalar. Yardım menüsünde de bu bilgiler bulunur.
