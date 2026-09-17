@@ -3,18 +3,19 @@
 import time
 import queue
 import subprocess
+import secrets
 import ipaddress
-from html import escape
 from collections import OrderedDict, deque, defaultdict
 from datetime import datetime
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, filedialog
 
 from netshield.config import ESIKLER, PACKET_HISTORY, ALERT_HISTORY
 from netshield.core.motor import Motor, SCAPY_OK
 from netshield.core.filters import compile_filter
 from netshield.core.settings import default_path, load_settings
-from netshield.net.utils import is_root, get_cached_geo
+from netshield.net.utils import is_root
+from netshield.core.security import load_managed_policy, effective_policy, PrivateSnapshot, private_write, render_report
 from netshield.ui.workspace import WorkspaceUI, BG, SURF, CARD, ACC, GRN, RED, YLW, TXT, MUT, WHT
 
 TITLE = 'NetShield — Ağ Analizi'
@@ -35,8 +36,10 @@ class App(WorkspaceUI):
         self.settings_path = settings_path or default_path()
         self.preferences, settings_error = load_settings(self.settings_path)
         self.esik = dict(self.preferences['thresholds'])
+        self.managed_policy, policy_error = load_managed_policy()
         self.motor = None
         self.banned = {}
+        self._firewall_tag = 'netshield-' + secrets.token_hex(8)
         self.olaylar = []
         self.sayac = defaultdict(int)
         self.trafik = deque([0] * 90, maxlen=90)
@@ -50,6 +53,8 @@ class App(WorkspaceUI):
         self._closed = False
         self._after_id = None
         self._build()
+        if policy_error:
+            self._syslog('HATA', policy_error)
         if settings_error:
             self._syslog('HATA', settings_error)
         if autostart:
@@ -212,6 +217,8 @@ class App(WorkspaceUI):
         self.root.destroy()
 
     def _manuel_ban(self):
+        if not self._security_allows('allow_firewall', firewall=True):
+            return
         win = tk.Toplevel(self.root)
         win.title("Manuel IP Banla")
         win.configure(bg=CARD); win.geometry("340x130")
@@ -231,9 +238,19 @@ class App(WorkspaceUI):
                   padx=10,pady=5).pack(pady=12)
 
     def _ban_ip(self, ip, sebep):
+        if not self._security_allows('allow_firewall', firewall=True):
+            return
+        try:
+            address = ipaddress.IPv4Address(ip)
+            if address.is_loopback or address.is_unspecified or address.is_multicast:
+                raise ValueError('Bu adres engellenemez.')
+            ip = str(address)
+        except ValueError as exc:
+            self._syslog('HATA', str(exc))
+            return
         if ip in self.banned: return
         try:
-            subprocess.run(["sudo","iptables","-A","INPUT","-s",ip,"-j","DROP"],
+            subprocess.run(["/usr/sbin/iptables","-w","3","-I","INPUT","1","-s",ip,"-m","comment","--comment",self._firewall_tag,"-j","DROP"],
                            check=True,timeout=5,capture_output=True)
         except Exception as ex:
             self._syslog("HATA",f"iptables başarısız ({ip}): {ex}")
@@ -244,12 +261,14 @@ class App(WorkspaceUI):
         self._log_yaz(f"[{now_str()}] [BAN] {ip} {durum} — {sebep}\n","BAN")
 
     def _ban_kaldir(self):
+        if not self._security_allows('allow_firewall', firewall=True):
+            return
         sel = self._ban_list.curselection()
         if not sel: return
         item = self._ban_list.get(sel[0])
         ip   = item.split()[0]
         try:
-            subprocess.run(["sudo","iptables","-D","INPUT","-s",ip,"-j","DROP"],
+            subprocess.run(["/usr/sbin/iptables","-w","3","-D","INPUT","-s",ip,"-m","comment","--comment",self._firewall_tag,"-j","DROP"],
                            check=True,timeout=5,capture_output=True)
         except Exception as ex:
             self._syslog("HATA",f"Kural silinemedi ({ip}): {ex}")
@@ -259,176 +278,37 @@ class App(WorkspaceUI):
         self._log_yaz(f"[{now_str()}] [OK] {ip} ban listesinden kaldırıldı.\n","OK")
 
     def _rapor(self):
-        """Detaylı HTML raporu oluştur ve tarayıcıda aç."""
+        if not self._security_allows('allow_exports'):
+            return
         if not self.olaylar:
-            messagebox.showinfo("Rapor","Henüz kayıtlı olay yok."); return
-
-        # İstatistikler
-        flood_olaylar  = [o for o in self.olaylar if o["tip"]=="FLOOD"]
-        ip_sayac       = defaultdict(int)
-        tur_sayac      = defaultdict(int)
-        for o in self.olaylar:
-            ip_sayac[o["ip"]] += 1
-            tur_sayac[o["tur"]] += 1
-
-        top_ip  = sorted(ip_sayac.items(), key=lambda x:-x[1])[:10]
-        top_tur = sorted(tur_sayac.items(), key=lambda x:-x[1])
-
-        # Zaman aralığı
-        if self.olaylar:
-            ilk = self.olaylar[0]["ts"]
-            son = self.olaylar[-1]["ts"]
-        else:
-            ilk = son = "-"
-
-        # Geo cache
-        geo_tablo = ""
-        for ip, cnt in top_ip:
-            geo = get_cached_geo(ip)
-            ulke = escape(geo.get("country","-")); sehir = escape(geo.get("city","-"))
-            isp  = escape(geo.get("isp","-"))
-            geo_tablo += f"""
-            <tr>
-              <td>{ip}</td>
-              <td>{cnt}</td>
-              <td>{ulke}</td>
-              <td>{sehir}</td>
-              <td>{isp}</td>
-            </tr>"""
-
-        tur_satirlar = ""
-        for tur,cnt in top_tur:
-            tur_satirlar += f"<tr><td>{tur}</td><td>{cnt}</td></tr>"
-
-        # Son 100 olay tablosu
-        son_olaylar = ""
-        for o in reversed(self.olaylar[-100:]):
-            renk = "#ff3355" if o["tip"]=="FLOOD" else "#4a6080"
-            son_olaylar += f"""
-            <tr style='color:{renk}'>
-              <td>{o['ts']}</td>
-              <td>{o['tip']}</td>
-              <td>{o['tur']}</td>
-              <td>{o['ip']}</td>
-              <td>{escape(o.get('dst', '-'))}</td>
-              <td>{escape(o.get('severity', '-'))}</td>
-              <td>{escape(o['detay'])}</td>
-            </tr>"""
-
-        # Banlı IP'ler
-        ban_satirlar = ""
-        for ip,d in self.banned.items():
-            ban_satirlar += f"<tr><td>{ip}</td><td>{d['tur']}</td><td>{d['ts']}</td></tr>"
-        if not ban_satirlar:
-            ban_satirlar = "<tr><td colspan='3'>Banlı IP yok</td></tr>"
-
-        html = f"""<!DOCTYPE html>
-<html lang='tr'>
-<head>
-<meta charset='UTF-8'>
-<title>NetShield — Güvenlik Raporu</title>
-<style>
-  * {{ box-sizing:border-box; margin:0; padding:0; }}
-  body {{ background:#07090f; color:#c8d8e8; font-family:'Courier New',monospace;
-          padding:30px; font-size:13px; }}
-  h1 {{ color:#00cfff; font-size:22px; border-bottom:1px solid #1e2d45;
-        padding-bottom:10px; margin-bottom:20px; }}
-  h2 {{ color:#00cfff; font-size:15px; margin:24px 0 10px; }}
-  .meta {{ color:#4a6080; font-size:12px; margin-bottom:20px; }}
-  .kart-row {{ display:flex; gap:12px; margin-bottom:20px; }}
-  .kart {{ background:#141e2e; border-top:3px solid; padding:14px 18px;
-           flex:1; border-radius:4px; }}
-  .kart h3 {{ font-size:10px; color:#4a6080; margin-bottom:6px; }}
-  .kart .val {{ font-size:28px; font-weight:bold; color:#fff; }}
-  table {{ width:100%; border-collapse:collapse; margin-bottom:20px; }}
-  th {{ background:#141e2e; color:#4a6080; padding:7px 10px;
-        text-align:left; font-size:11px; border-bottom:1px solid #1e2d45; }}
-  td {{ padding:6px 10px; border-bottom:1px solid #0f1520; font-size:12px; }}
-  tr:hover td {{ background:#0f1520; }}
-  .flood {{ color:#ff3355; font-weight:bold; }}
-  .paket {{ color:#4a6080; }}
-  footer {{ margin-top:30px; color:#4a6080; font-size:11px;
-            border-top:1px solid #1e2d45; padding-top:10px; }}
-</style>
-</head>
-<body>
-
-<h1>◈ NetShield — Güvenlik Raporu</h1>
-<div class='meta'>
-  Oluşturma tarihi: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')} |
-  Rapor kapsamı: bellekteki son {len(self.olaylar)} alarm | {ilk} → {son} |
-  Mod: {'Karma / kayıt bazında' if any(o.get('simulated') for o in self.olaylar) and any(not o.get('simulated') for o in self.olaylar) else 'SİMÜLASYON' if any(o.get('simulated') for o in self.olaylar) else 'CANLI'}
-</div>
-
-<div class='kart-row'>
-  <div class='kart' style='border-color:#00cfff'>
-    <h3>TOPLAM OLAY</h3>
-    <div class='val'>{len(self.olaylar)}</div>
-  </div>
-  <div class='kart' style='border-color:#ff3355'>
-    <h3>FLOOD ALARMI</h3>
-    <div class='val'>{len(flood_olaylar)}</div>
-  </div>
-  <div class='kart' style='border-color:#ffd060'>
-    <h3>FARKLI HEDEF</h3>
-    <div class='val'>{len({o["dst"] for o in self.olaylar if o.get("dst")})}</div>
-  </div>
-  <div class='kart' style='border-color:#b48eff'>
-    <h3>BANLI IP</h3>
-    <div class='val'>{len(self.banned)}</div>
-  </div>
-  <div class='kart' style='border-color:#00e87a'>
-    <h3>FARKLI IP</h3>
-    <div class='val'>{len(ip_sayac)}</div>
-  </div>
-</div>
-
-<h2>Tür Dağılımı</h2>
-<table>
-  <tr><th>Saldırı Türü</th><th>Olay Sayısı</th></tr>
-  {tur_satirlar}
-</table>
-
-<h2>En Aktif Kaynaklar</h2>
-<table>
-  <tr><th>IP</th><th>Olay</th><th>Ülke</th><th>Şehir</th><th>ISP</th></tr>
-  {geo_tablo}
-</table>
-
-<h2>Banlı IP'ler</h2>
-<table>
-  <tr><th>IP</th><th>Sebep</th><th>Zaman</th></tr>
-  {ban_satirlar}
-</table>
-
-<h2>Son 100 Olay</h2>
-<table>
-  <tr><th>Saat</th><th>Tip</th><th>Tür</th><th>IP</th><th>Hedef</th><th>Önem</th><th>Detay</th></tr>
-  {son_olaylar}
-</table>
-
-<footer>
-  NetShield — Rapor otomatik oluşturuldu |
-  {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}
-</footer>
-</body>
-</html>"""
-
-        # Dosyaya yaz
-        rapor_dosya = f"/tmp/netshield_rapor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
-        with open(rapor_dosya, "w", encoding="utf-8") as f:
-            f.write(html)
-
-        # Aç
+            messagebox.showinfo('Rapor', 'Henüz kayıtlı alarm yok.', parent=self.root)
+            return
+        path = filedialog.asksaveasfilename(parent=self.root, title='Maskeli HTML raporu kaydet',
+                                           defaultextension='.html', filetypes=[('HTML', '*.html')])
+        if not path:
+            return
+        if not self._security_allows('allow_exports'):
+            return
+        snapshot = PrivateSnapshot().session([], self.olaylar, self._packet_total)
         try:
-            subprocess.Popen(["xdg-open", rapor_dosya])
-        except:
-            try:
-                subprocess.Popen(["firefox", rapor_dosya])
-            except:
-                messagebox.showinfo("Rapor", f"Rapor kaydedildi:\n{rapor_dosya}")
+            private_write(path, render_report(snapshot))
+        except OSError as exc:
+            messagebox.showerror('Rapor kaydedilemedi', str(exc), parent=self.root)
+            return
+        self._syslog('SİSTEM', 'Maskeli HTML raporu yerel dosyaya kaydedildi; tarayıcı açılmadı.')
 
-        self._log_yaz(f"[{now_str()}] Rapor oluşturuldu: {rapor_dosya}\n","OK")
+    def _security_allows(self, action, firewall=False):
+        self.managed_policy, error = load_managed_policy()
+        if error:
+            self._syslog('HATA', error)
+        policy = effective_policy(self.preferences['security'], self.managed_policy)
+        if not policy[action]:
+            self._syslog('HATA', 'Bu işlem etkin güvenlik politikası tarafından kapatıldı.')
+            return False
+        if firewall and (self.motor is None or self.motor.sim or not is_root()):
+            self._syslog('HATA', 'Firewall işlemi yalnızca yetkili canlı oturumda kullanılabilir.')
+            return False
+        return True
 
 
 def main():

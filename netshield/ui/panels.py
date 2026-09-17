@@ -3,6 +3,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from netshield.core.settings import save_settings, validate_settings
 from netshield.core.tracking import summarize
+from netshield.core.security import effective_policy, PrivateSnapshot, load_managed_policy
+import json
 from netshield.ui.theme import BG, SURF, CARD, TXT, MUT, ACC, GRN, YLW, RED, TUR_RENK
 
 
@@ -64,6 +66,7 @@ class AnalysisPanels:
 
         menubar = tk.Menu(self.root, bg=SURF, fg=TXT, activebackground=CARD, activeforeground=TXT)
         workspace = tk.Menu(menubar, tearoff=False)
+        workspace.add_command(label='Güvenlik merkezi', command=self._security_center)
         workspace.add_command(label='Görünüm ve IP takip ayarları', command=self._preferences)
         workspace.add_command(label='Tespit eşikleri ve profilleri', command=self._thresholds)
         workspace.add_command(label='Ağ arayüzlerini yenile', command=self._refresh_interfaces)
@@ -250,7 +253,7 @@ class AnalysisPanels:
         menu.add_separator()
         menu.add_command(label='Kaynak IP takip listesine ekle', command=lambda: self._watch_ip(packet['src']))
         menu.add_command(label='Hedef IP takip listesine ekle', command=lambda: self._watch_ip(packet['dst']))
-        menu.add_command(label='Paket özetini kopyala', command=self._copy_selected_packet)
+        menu.add_command(label='Maskeli paket özetini kopyala', command=self._copy_selected_packet)
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -264,10 +267,14 @@ class AnalysisPanels:
             self._syslog('SİSTEM', f'Takip listesine eklendi: {ip}')
 
     def _copy_selected_packet(self):
+        if not self._security_allows('allow_clipboard'):
+            return 'break'
         selection = self._packet_tree.selection()
         if selection:
             self.root.clipboard_clear()
-            self.root.clipboard_append('\t'.join(self._packet_tree.item(selection[0], 'values')))
+            packet = self._packets.get(selection[0])
+            if packet:
+                self.root.clipboard_append(json.dumps(PrivateSnapshot().packet(packet), ensure_ascii=False))
         return 'break'
 
     def _focus_filter(self):
@@ -338,3 +345,42 @@ class AnalysisPanels:
                             'Sağ tık: IP/bağlantı filtreleme ve takibe ekleme\nSütun başlığı: sırala, otomatik kaydırmayı kapat\n\n'
                             'Ağ filtresi: ip=192.168.1.0/24\nIPv6: proto=IPv6\nPort: sport=53 veya dport=443\n'
                             'Takip sayaçları yalnızca bellekteki önizlemeleri kapsar.', parent=self.root)
+
+
+    def _security_center(self):
+        self.managed_policy, policy_error = load_managed_policy()
+        if policy_error:
+            self._syslog('HATA', policy_error)
+        win = tk.Toplevel(self.root)
+        win.title('NetShield · Güvenlik merkezi')
+        win.configure(bg=SURF)
+        win.transient(self.root)
+        tk.Label(win, text='YEREL VE PASİF ÇALIŞMA', bg=SURF, fg=GRN,
+                 font=('DejaVu Sans', 13, 'bold')).pack(anchor='w', padx=20, pady=16)
+        tk.Label(win, text='Harici GeoIP / telemetri / bulut aktarımı yok.\nPaket yükü, ham baytlar ve HTTP URL içeriği saklanmaz.\nRaporlar otomatik tarayıcı açmaz; IP adresleri maskelenir.',
+                 bg=SURF, fg=TXT, justify='left').pack(anchor='w', padx=20)
+        profile = tk.StringVar(value=self.preferences['security']['profile'])
+        ttk.Combobox(win, textvariable=profile, state='readonly', values=['Bireysel', 'Kurumsal']).pack(fill='x', padx=20, pady=12)
+        variables = {}
+        for key, label in [('allow_exports', 'Maskeli yerel rapor / JSON kaydına izin ver'),
+                           ('allow_clipboard', 'Maskeli paket özetini panoya kopyalamaya izin ver'),
+                           ('allow_firewall', 'Yetkili canlı oturumda manuel INPUT engellemesine izin ver')]:
+            variable = tk.BooleanVar(value=self.preferences['security'][key])
+            variables[key] = variable
+            tk.Checkbutton(win, text=label, variable=variable, bg=SURF, fg=TXT,
+                           selectcolor=CARD, activebackground=SURF).pack(anchor='w', padx=16, pady=4)
+        policy = effective_policy(self.preferences['security'], self.managed_policy)
+        status = '\n'.join(f"{name}: {'Açık' if policy[key] else 'Kapalı'}" for key, name in
+                           [('allow_exports', 'Yerel dışa aktarım'), ('allow_clipboard', 'Pano'), ('allow_firewall', 'Manuel firewall')])
+        tk.Label(win, text='ETKİN POLİTİKA\n' + status, bg=CARD, fg=ACC, justify='left', padx=12, pady=12).pack(fill='x', padx=20, pady=12)
+        tk.Label(win, text='Kurumsal profil üç işlemi de kapatır. Yönetici politikası kullanıcı seçimini daraltabilir.\n'
+                           'Canlı analizde IP adresleri ekranda ve sınırlı bellekte görünür.\n'
+                           'Dosya ve pano hedefleri işletim sistemi tarafından eşitleniyor olabilir.\n'
+                           'Bu uygulama diğer programların ağ erişimini engellemez; bir OS sandbox değildir.',
+                 bg=SURF, fg=MUT, justify='left', wraplength=570).pack(anchor='w', padx=20, pady=8)
+        def save():
+            security = dict(profile=profile.get(), **{key: value.get() for key, value in variables.items()})
+            if self._commit_preferences(security=security):
+                self._syslog('SİSTEM', 'Güvenlik politikası güncellendi.')
+                win.destroy()
+        self._button(win, 'Politikayı kaydet', save, True).pack(fill='x', padx=20, pady=16)

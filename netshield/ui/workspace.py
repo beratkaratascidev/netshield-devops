@@ -5,6 +5,7 @@ from tkinter import ttk, scrolledtext, filedialog, messagebox
 from netshield.core.filters import compile_filter
 from netshield.core.motor import get_if_list, SCAPY_OK
 from netshield.net.utils import is_root
+from netshield.core.security import PrivateSnapshot, private_write
 
 from netshield.ui.theme import (BG, SURF, CARD, BRD, ACC, GRN, RED, YLW, PRP, TXT, MUT, WHT, TUR_RENK, THRESHOLD_LABELS)
 from netshield.ui.panels import AnalysisPanels
@@ -43,6 +44,7 @@ class WorkspaceUI(AnalysisPanels):
                  font=('DejaVu Sans', 19, 'bold')).pack(side='left')
         tk.Label(header, text=' /  Ağ analiz çalışma alanı', bg=BG, fg=MUT,
                  font=('DejaVu Sans', 10)).pack(side='left', padx=8)
+        self._button(header, 'Güvenlik merkezi', self._security_center).pack(side='right', padx=10)
         self._mod_lbl = tk.Label(header, text='● HAZIR', bg=CARD, fg=GRN,
                                  padx=12, pady=6, font=('DejaVu Sans', 9, 'bold'))
         self._mod_lbl.pack(side='right')
@@ -149,7 +151,7 @@ class WorkspaceUI(AnalysisPanels):
         self._details = scrolledtext.ScrolledText(inspector, bg=SURF, fg=TXT, relief='flat',
                                                   font=('DejaVu Sans Mono', 9), height=8, state='disabled', highlightthickness=0)
         self._details.pack(fill='both', expand=True)
-        self._show_details('Bir paket veya alarm seçin.\nKaynak, hedef, protokol ve ham veri önizlemesi burada görünür.')
+        self._show_details('Bir paket veya alarm seçin.\nKaynak, hedef ve protokol bilgileri burada görünür; içerik saklanmaz.')
 
         tk.Label(right, text='TRAFİK · SON 90 ÖLÇÜM', bg=SURF, fg=MUT,
                  font=('DejaVu Sans', 9, 'bold')).pack(anchor='w')
@@ -261,12 +263,10 @@ class WorkspaceUI(AnalysisPanels):
         if not selection or selection[0] not in self._packets:
             return
         p = self._packets[selection[0]]
-        raw = p.get('hex', '').split()
-        lines = [' '.join(raw[n:n+16]) for n in range(0, len(raw), 16)]
         self._show_details(f"{p['proto']}  |  {p['src']}:{p.get('sport') or '—'} → {p['dst']}:{p.get('dport') or '—'}\n"
                            f"Zaman: {p['ts']}   Arayüz: {p.get('interface', '—')}   Uzunluk: {p['length']} B   Bayraklar: {p.get('flags', '—')}\n"
-                           f"{p['info']}\n\nYük önizlemesi (en fazla 256 bayt):\n{p.get('payload', '')}\n\n"
-                           'Ham paket (ilk 256 bayt):\n' + ('\n'.join(lines) or 'Simülasyonda ham paket yok.'))
+                           f"{p['info']}\n\n"
+                           'Gizlilik politikası: ham paket ve uygulama içeriği saklanmaz.')
 
     def _alert_selected(self, _=None):
         selection = self._alert_tree.selection()
@@ -320,17 +320,18 @@ class WorkspaceUI(AnalysisPanels):
         self._button(win, 'Kaydet', save, True).grid(row=len(entries)+1, column=0, columnspan=2, pady=14)
 
     def _export(self):
+        if not self._security_allows('allow_exports'):
+            return
         path = filedialog.asksaveasfilename(parent=self.root, title='Oturumu dışa aktar',
                                            defaultextension='.json', filetypes=[('JSON', '*.json')])
         if not path:
             return
-        data = dict(schema_version=1, thresholds=self.esik, total_packets=self._packet_total,
-                    preview_dropped=self._preview_dropped_total + self.motor.preview_dropped,
-                    packets=list(self._packets.values()), alerts=self.olaylar)
+        if not self._security_allows('allow_exports'):
+            return
+        data = PrivateSnapshot().session(self._packets.values(), self.olaylar, self._packet_total)
         try:
-            with open(path, 'w', encoding='utf-8') as output:
-                json.dump(data, output, ensure_ascii=False, indent=2)
+            private_write(path, json.dumps(data, ensure_ascii=False, indent=2))
         except OSError as exc:
             messagebox.showerror('Dışa aktarma hatası', str(exc), parent=self.root)
             return
-        self._syslog('SİSTEM', f'JSON kaydedildi: {path}')
+        self._syslog('SİSTEM', 'Maskeli JSON yerel dosyaya kaydedildi.')

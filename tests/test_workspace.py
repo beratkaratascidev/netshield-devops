@@ -87,6 +87,24 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(a._packet_tree.get_children(), ('1', '2'))
         self.assertIn('192.168.1.99', json.loads(Path(a.settings_path).read_text())['watchlist'])
 
+    def test_security_center_disables_exports_and_clipboard_in_enterprise_mode(self):
+        from tkinter import ttk
+        a = self.app
+        a._security_center()
+        dialog = next(child for child in self.root.winfo_children() if isinstance(child, tk.Toplevel))
+        profile = next(child for child in dialog.winfo_children() if isinstance(child, ttk.Combobox))
+        profile.set('Kurumsal')
+        save = next(child for child in dialog.winfo_children() if isinstance(child, tk.Button) and child.cget('text') == 'Politikayı kaydet')
+        save.invoke()
+        self.assertEqual(a.preferences['security']['profile'], 'Kurumsal')
+        with patch('netshield.ui.workspace.filedialog.asksaveasfilename') as choose, \
+                patch.object(a.root, 'clipboard_append') as clipboard:
+            a._export()
+            a._copy_selected_packet()
+            choose.assert_not_called()
+            clipboard.assert_not_called()
+        self.assertFalse(json.loads(Path(a.settings_path).read_text())['security']['allow_exports'])
+
     def test_tracking_can_exclude_demo_records(self):
         a = self.app
         packet = dict(ts='12:00:00', src='192.0.2.1', dst='192.0.2.2', sport=1000,

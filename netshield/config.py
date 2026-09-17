@@ -30,5 +30,3 @@ ALERT_HISTORY = 2000
 
 # Aynı IP, protokol ve olay türü için bildirim aralığı
 COOLDOWN = 1.0
-
-GEO_URL = "http://ip-api.com/json/{ip}?fields=status,country,city,isp"

@@ -35,17 +35,19 @@ switch üzerinde port aynalama/SPAN, bir TAP veya ilgili ağ geçidinden
 
 - **Paketler:** Zaman, kaynak/hedef, protokol, uzunluk ve paket özeti.
   TCP, UDP, HTTP/1, DNS, ICMP, ARP ve IPv6 görüntülenir.
-- **Ayrıntılar:** Seçili paket için portlar, TCP bayrakları, yük ve ham
-  paketin ilk 256 baytı; seçili alarm için ölçüm ve eşik.
+- **Ayrıntılar:** Seçili paket için portlar, TCP bayrakları ve boyut;
+  seçili alarm için ölçüm ve eşik. Ham baytlar, yük ve HTTP URL saklanmaz.
 - **Alarmlar:** Kaynak, hedef, tespit türü, önem ve ölçüm penceresi.
 - **Akışı izle:** Otomatik kaydırmayı kapatarak eski kayıtları inceleyin.
 - **Eşikler:** Yakalama durdurulunca değiştirilebilir. Sonraki başlatmada
   uygulanır ve kullanıcı ayarlarına kaydedilir. Hassas, Dengeli ve Yoğun ağ
   profilleri başlangıç noktası sağlar; bunlar otomatik öğrenilen eşikler değildir.
-- **JSON dışa aktar:** Bellekteki paket önizlemeleri, alarmlar ve eşikler.
+- **JSON dışa aktar:** İzinli alanlarla sınırlandırılmış paket/alarm metaverisi;
+  IP adresleri her dosyaya özel takma kimliklerle gösterilir (şema sürümü 2).
   Tam PCAP kaydı değildir. Filtre yalnızca görünümü etkiler; dışa aktarım
   bellekteki bütün kayıtları içerir.
-- **HTML rapor:** Bellekte tutulan alarm geçmişi.
+- **HTML rapor:** Maskeli alarm geçmişi. Kullanıcı dosya konumunu seçer;
+  tarayıcı otomatik açılmaz. Kurumsal profilde JSON ve HTML kaydı kapalıdır.
 
 ### Görüntüleme filtresi
 
@@ -84,7 +86,8 @@ kaynak/hedef/tür başına en çok saniyede bir bildirilir. Dağıtık alarm hed
 başına sınırlandırılır. Kritik seviye, bildirilen ölçümün eşiğin en az iki
 katı olmasıdır; bağımsız bir saldırı doğrulaması değildir.
 
-HTTPS çözme, HTTP/2, TCP akış birleştirme, yeniden iletim ayıklama ve ICMPv6
+HTTP/1 sınıflandırması yükün ilk 512 baytıyla sınırlıdır; daha uzun istek
+satırları tanınmayabilir. HTTPS çözme, HTTP/2, TCP akış birleştirme, yeniden iletim ayıklama ve ICMPv6
 flood analizi yoktur. IPv6 TCP/UDP trafiği aynı hız kurallarıyla işlenir;
 IPv6 uzantı başlıklarının ayrıntılı görünümü yoktur. ARP görüntülenir,
 ARP zehirleme tespiti yapılmaz. UDP port çeşitliliği normal sunucu trafiğinde
@@ -101,10 +104,13 @@ de oluşabilir.
 - Simülasyon sentetik kayıtları **aynı tespit motoruna** verir; ağa paket
   göndermez. Sentetik kayıtlarda gerçek ham paket bulunmaz. Demo üretimi
   senaryo başına 5000 paketle sınırlıdır.
-- Otomatik ban kapalıdır. Manuel ban, **simülasyonda da gerçek**
-  `sudo iptables` komutu çalıştırır. IPv4 INPUT zincirini etkiler; ağdaki
-  başka cihazların firewall'larını değiştirmez. Uygulama kapanınca kurallar
-  kaldırılmaz. Liste yalnızca bu uygulama oturumundaki işlemleri gösterir.
+- Otomatik ban yoktur; manuel firewall işlemleri de varsayılan olarak kapalıdır.
+  Bireysel profilde açıkça etkinleştirilirse yalnızca root yetkili canlı oturumda
+  `/usr/sbin/iptables` kullanılır; uygulama `sudo` ile yetki yükseltmez.
+  Simülasyonda engelleme yapılmaz. Kurallar oturuma özel yorumla IPv4 INPUT
+  zincirine eklenir. Kapatmak veya profili değiştirmek mevcut kuralları kaldırmaz;
+  liste yalnızca bu oturumun eklediği kuralları gösterir. Çıkış trafiğine veya
+  başka cihazların firewall'larına dokunulmaz.
 - Görünümü temizlemek firewall kurallarını ve tespit pencerelerini silmez.
 - Bu sürüm otomatik harici GeoIP sorgusu göndermez.
 
@@ -153,7 +159,7 @@ ve durdurulmuş yakalama için arayüz listesini yenileme bulunur. **Görünüm*
 menüsünden sağ panel ve paket ayrıntıları gizlenebilir. Rahat/Kompakt tablo
 satır yoğunluğu seçilebilir.
 
-Eşikler, satır yoğunluğu ve en fazla 100 takip IP'si
+Eşikler, güvenlik tercihleri, satır yoğunluğu ve en fazla 100 takip IP'si
 `$XDG_CONFIG_HOME/netshield/settings.json` konumunda; değişken tanımlı değilse
 `~/.config/netshield/settings.json` konumunda saklanır. Dosya atomik olarak
 değiştirilir; bozuk dosyada varsayılanlar yüklenir ve günlükte neden belirtilir.
@@ -164,4 +170,22 @@ eşiklerin etkinleşmesi için yeniden başlatma gerekir.
 
 Kısayollar: **Ctrl+F** filtreye odaklanır; filtrede **Enter** uygular,
 **Esc** temizler; **Ctrl+E** JSON dışa aktarır; paket tablosunda **Ctrl+C**
-seçili özeti kopyalar. Yardım menüsünde de bu bilgiler bulunur.
+güvenlik politikasında izin verilmişse maskeli özeti kopyalar. Yardım menüsünde de bu bilgiler bulunur.
+
+## Güvenlik tabanı
+
+**Güvenlik merkezi** üzerinden Bireysel/Kurumsal profil ve işlem izinleri seçilir.
+Varsayılan Bireysel profilde maskeli yerel dosya kaydı açık; pano ve firewall
+kapalıdır. Kurumsal profil üçünü de kapatır. Yönetici politikası bu izinleri
+daha da kısıtlayabilir. Harici GeoIP istemcisi kaldırılmıştır; uygulamada
+telemetri, bulut yüklemesi, aktif ağ taraması ve otomatik tarayıcı açma yoktur.
+
+Raporlar/JSON dosyaları POSIX'te `0600` izinle atomik yazılır. IP maskesi aynı
+dosyada tutarlı, farklı dosyalarda farklıdır; maskeleme anahtarı dışa aktarılmaz.
+Yük, ham bayt, URL, serbest metin, arayüz adı ve takip listesi dışa aktarılmaz.
+Bu bir veri azaltma ve takma kimlik yöntemidir; bütün metaverinin anonim olduğu
+anlamına gelmez. Geçmiş sürümlerde oluşturulmuş dosyalar otomatik değiştirilmez.
+
+Kurumsal dağıtım sınırları, yönetici politikası kurulumu ve test kapsamı için
+[SECURITY.md](SECURITY.md) dosyasına bakın. Bu taban işletim sistemi güvenlik
+sınırı, sertifikasyon veya diğer uygulamalar için ağ çıkış engeli değildir.

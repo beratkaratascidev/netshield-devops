@@ -1,42 +1,55 @@
 import queue
 import subprocess
 import unittest
+import tempfile
+from pathlib import Path
+from netshield.core.settings import validate_settings
 from collections import deque
 from types import SimpleNamespace
-from unittest.mock import Mock, mock_open, patch
+from unittest.mock import Mock, patch
 
 import ids
 from netshield.config import ESIKLER
 from netshield.core import motor
-from netshield.net import utils
 
 
 class AppTests(unittest.TestCase):
     def setUp(self):
         self.app = ids.App.__new__(ids.App)
         self.app.banned = {}
+        self.app.root = Mock()
+        self.app._firewall_tag = 'netshield-test'
+        self.app.preferences = validate_settings({'security': {'allow_firewall': True}})
+        self.app.managed_policy = {}
+        root_patch = patch.object(ids, 'is_root', return_value=True)
+        root_patch.start()
+        self.addCleanup(root_patch.stop)
         self.app._closed = False
         self.app._refresh_tracking = Mock()
         self.app._resort_tables = Mock()
         self.app._autoscroll = Mock()
         self.app._autoscroll.get.return_value = False
         self.app.motor = motor.Motor(queue.Queue(), dict(ESIKLER))
+        self.app.motor.sim = False
         self.app._packet_total = 0
         self.app._grafik_ciz = Mock()
         self.app._ban_list = Mock()
         self.app._syslog = Mock()
         self.app._log_yaz = Mock()
 
-    def test_report_with_event_and_cached_geo(self):
-        self.app.olaylar = [dict(ip='192.0.2.1', tip='PAKET', tur='ICMP',
-                                ts='12:00:00', detay='test')]
-        output = mock_open()
-        with patch.object(ids, 'get_cached_geo', return_value={'country': '<test>'}), \
-                patch('builtins.open', output), patch.object(ids.subprocess, 'Popen'):
-            self.app._rapor()
-        html = output().write.call_args.args[0]
-        self.assertIn('192.0.2.1', html)
-        self.assertIn('&lt;test&gt;', html)
+    def test_report_is_masked_and_does_not_launch_browser(self):
+        self.app.olaylar = [dict(ip='192.0.2.1', dst='192.0.2.2', tip='FLOOD', tur='<test>',
+                                ts='12:00:00', detay='secret')]
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'report.html'
+            with patch.object(ids.filedialog, 'asksaveasfilename', return_value=str(path)), \
+                    patch.object(ids.subprocess, 'Popen') as launch:
+                self.app._rapor()
+            html = path.read_text()
+            self.assertNotIn('192.0.2.1', html)
+            self.assertNotIn('secret', html)
+            self.assertIn('&lt;test&gt;', html)
+            launch.assert_not_called()
 
     def test_failed_ban_does_not_record_or_block_retry(self):
         with patch.object(ids.subprocess, 'run', side_effect=subprocess.CalledProcessError(1, 'iptables')):
@@ -152,11 +165,6 @@ class MotorTests(unittest.TestCase):
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]['tur'], 'HTTP Flood')
 
-    def test_geo_snapshot_cannot_mutate_cache(self):
-        with patch.dict(utils._geo_cache, {'192.0.2.1': {'country': 'Test'}}):
-            result = utils.get_cached_geo('192.0.2.1')
-            result['country'] = 'changed'
-            self.assertEqual(utils.get_cached_geo('192.0.2.1')['country'], 'Test')
 
 
 if __name__ == '__main__':

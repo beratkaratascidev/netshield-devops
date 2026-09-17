@@ -149,8 +149,8 @@ class PacketNormalizationTests(unittest.TestCase):
         wire = m.IP(src='192.0.2.1', dst='192.0.2.2') / m.TCP(dport=80) / (b'x' * 5000)
         record = self.motor._normalize(wire)
         self.assertEqual(record['payload_size'], 5000)
-        self.assertEqual(len(record['payload']), 256)
-        self.assertEqual(len(record['hex'].split()), 256)
+        self.assertEqual(record['payload'], '')
+        self.assertEqual(record['hex'], '')
 
 
 if __name__ == '__main__':

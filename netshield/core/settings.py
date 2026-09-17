@@ -5,6 +5,7 @@ import tempfile
 import ipaddress
 from pathlib import Path
 from netshield.config import ESIKLER
+from netshield.core.security import validate_security
 
 
 def default_path():
@@ -28,7 +29,7 @@ def validate_settings(data):
         raise ValueError('En fazla 100 adres takip edilebilir.')
     watched = list(dict.fromkeys(str(ipaddress.ip_address(ip)) for ip in watchlist))
     return dict(version=1, thresholds={k: thresholds[k] for k in ESIKLER},
-                density=density, watchlist=watched)
+                density=density, watchlist=watched, security=validate_security(data.get('security', {})))
 
 
 def load_settings(path):
@@ -38,7 +39,7 @@ def load_settings(path):
     except FileNotFoundError:
         return validate_settings({}), None
     except (OSError, ValueError, TypeError) as exc:
-        return validate_settings({}), f'Ayarlar okunamadı; varsayılanlar kullanılıyor: {exc}'
+        return validate_settings({'security': {'profile': 'Kurumsal'}}), f'Ayarlar okunamadı; kısıtlı güvenlik profili kullanılıyor: {exc}'
 
 
 def save_settings(path, data):

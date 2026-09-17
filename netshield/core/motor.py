@@ -131,31 +131,31 @@ class Motor:
             layer = packet[ARP]
             return dict(ts=ts_str(), src=layer.psrc, dst=layer.pdst, sport=None, dport=None,
                         proto='ARP', transport='ARP', length=len(packet), flags='',
-                        info=f'ARP op={layer.op} · {layer.hwsrc}', interface=self.iface or '',
-                        hex=bytes(packet)[:256].hex(' '), payload='', simulated=False)
+                        info=f'ARP op={layer.op}', interface=self.iface or '',
+                        hex='', payload='', simulated=False)
         else:
             return None
         record = dict(ts=ts_str(), src=layer.src, dst=getattr(layer, 'dst', ''),
                       sport=None, dport=None, proto=version, transport=version, network=version,
                       length=len(packet), flags='', flags_value=0, payload_size=0,
                       info=version, interface=self.iface or '', simulated=False,
-                      hex=bytes(packet)[:256].hex(' '), payload='')
+                      hex='', payload='')
         if TCP in packet or UDP in packet:
             transport = 'TCP' if TCP in packet else 'UDP'
             layer = packet[TCP] if transport == 'TCP' else packet[UDP]
-            payload = bytes(layer.payload)
+            payload = bytes(layer.payload)[:512]
+            payload_size = len(layer.payload)
             record.update(transport=transport, proto=transport, sport=layer.sport,
-                          dport=layer.dport, payload_size=len(payload),
-                          payload=payload[:256].decode('utf-8', errors='replace'))
+                          dport=layer.dport, payload_size=payload_size)
             if transport == 'TCP':
                 record.update(flags=str(layer.flags), flags_value=int(layer.flags))
                 if layer.dport in HTTP_PORTS and HTTP_LINE.match(payload):
                     record.update(proto='HTTP', http_request=True)
             if DNS in packet:
                 record.update(proto='DNS', dns_query=int(packet[DNS].qr) == 0)
-            record['info'] = f"{layer.sport} → {layer.dport}  {record['flags']}  yük={len(payload)} B"
+            record['info'] = f"{layer.sport} → {layer.dport}  {record['flags']}  yük={payload_size} B"
             if record.get('http_request'):
-                record['info'] = payload.split(b'\r\n', 1)[0][:160].decode('utf-8', errors='replace')
+                record['info'] = 'HTTP/1 isteği · içerik saklanmadı'
         elif ICMP in packet:
             record.update(proto='ICMP', transport='ICMP', icmp_type=packet[ICMP].type,
                           info=f'ICMP type={packet[ICMP].type} code={packet[ICMP].code}')
@@ -164,6 +164,8 @@ class Motor:
     def _ingest(self, record, ts):
         self._sequence += 1
         record['id'] = self._sequence
+        record['payload'] = ''
+        record['hex'] = ''
         with self._traffic_lock:
             self._traffic_count += 1
             if len(self._previews) == self._previews.maxlen:
