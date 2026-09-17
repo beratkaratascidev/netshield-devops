@@ -131,3 +131,18 @@ işçisi kullanılır. Saklama varsayılanı 30 gün, cihaz başına 1.000 olay;
 Eski JSON otomatik aktarılır ancak kaynak dosya otomatik silinmez. DB varken eski
 JSON'a sessiz geri dönüş yapılmaz. Disk okumaları GUI dışında yürütülür.
 [Kurulum, protokol, testler ve sınırlar](docs/RECEIVER_OPERATIONS.md).
+
+### Yerel eşleştirme penceresi
+
+GUI ve CLI aynı eşleştirme işlevini kullanır. Her işlem OS dosya kilidiyle sıralanır;
+cihaz anahtarı yenileme/iptali farklı cihaz kayıtlarını ezmez. Yeni yapılandırma
+dosyası özel izinlerle ve yalnız dosya henüz yoksa oluşturulur; uygulamanın veri
+dosyaları çıktı olarak seçilemez. Anahtar özeti kaydedilemezse yeni çıktı kaldırılır
+ve mevcut anahtar değiştirilmez. İki dosya için süreç çökmesine dayanıklı tek bir
+transaction garantisi yoktur: çıktı yazıldıktan sonra süreç çökerse henüz geçerli
+olmayan bir yapılandırma kalabilir; yeni bir dosyaya yeniden eşleştirme yapılmalıdır.
+
+Pencere anahtarı göstermez ve ağ isteği yapmaz. Bildirim kontrolü yerel alıcı kaydını
+okur; sertifika/DNS tanılaması yapıldığı veya yeni anahtarın uzak Windows üzerinde
+kullanıldığı tek başına kanıtlanmaz. Anahtar hâlâ Windows'a taşınacak JSON dosyasında
+açık metindir; korumalı Windows anahtar deposu işi henüz tamamlanmadı.

@@ -17,11 +17,12 @@ def validate_devices(devices):
             if not isinstance(value, str) or len(value) > limit or any(ord(c) < 32 or ord(c) == 127 for c in value):
                 raise ValueError(f'Geçersiz envanter alanı: {key}')
             clean[key] = value.strip()
-        if not all(clean[k] for k in ('id', 'name', 'department', 'ip')):
-            raise ValueError('Ad, bölüm ve IP adresi zorunludur.')
-        clean['ip'] = str(ipaddress.ip_address(clean['ip']))
+        if not all(clean[k] for k in ('id', 'name', 'department')):
+            raise ValueError('Ad ve bölüm zorunludur.')
+        if clean['ip']:
+            clean['ip'] = str(ipaddress.ip_address(clean['ip']))
         address = (clean['ip'], clean['interface'])
-        if clean['id'] in ids or address in addresses:
+        if clean['id'] in ids or (clean['ip'] and address in addresses):
             raise ValueError('Bu IP ve arayüz için zaten bir kayıt var.')
         ids.add(clean['id'])
         addresses.add(address)
@@ -31,6 +32,9 @@ def validate_devices(devices):
 
 def device_activity(device, packets, alerts):
     ip, interface = device['ip'], device['interface']
+    if not ip:
+        return dict(ip='', sent=0, received=0, bytes=0, alerts=0, last='—', sent_bytes=0,
+                    received_bytes=0, conversations=[], events=[], status='IP tanımlı değil')
     def matches(record, fields):
         return (not interface or record.get('interface') == interface) and ip in (record.get(k) for k in fields)
     packets = [p for p in packets if matches(p, ('src', 'dst'))]

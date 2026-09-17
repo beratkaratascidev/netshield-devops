@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 from netshield.core.agent_status import status_label
 from netshield.core.snapshot_reader import SnapshotReader
+from netshield.ui.pairing import PairingDialog
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 from netshield.core.inventory import DeviceActivityIndex
@@ -39,7 +40,8 @@ class InventoryPanel:
         self._device_tree.bind('<Double-1>', lambda _: self._follow_device())
 
     def _selected_device(self):
-        selection = self._device_tree.selection()
+        tree = self._agent_tree if self._tracking_tabs.select() == str(self._agent_page) else self._device_tree
+        selection = tree.selection()
         return next((d for d in self.preferences['devices'] if selection and d['id'] == selection[0]), None)
 
     def _save_device(self, device):
@@ -70,7 +72,7 @@ class InventoryPanel:
         win.configure(bg=SURF)
         win.transient(self.root)
         fields = {}
-        for key, label in (('name', 'Ad / cihaz adı'), ('department', 'Bölüm'), ('ip', 'IP adresi'),
+        for key, label in (('name', 'Ad / cihaz adı'), ('department', 'Bölüm'), ('ip', 'IP adresi (ajan için isteğe bağlı)'),
                            ('interface', 'Yakalama arayüzü (boş: tümü)')):
             tk.Label(win, text=label, bg=SURF, fg=TXT).pack(anchor='w', padx=20, pady=(10, 3))
             fields[key] = tk.StringVar(value=device.get(key, ''))
@@ -79,12 +81,22 @@ class InventoryPanel:
             else:
                 entry = ttk.Entry(win, textvariable=fields[key], width=42)
             entry.pack(fill='x', padx=20)
-        tk.Label(win, text='Aynı IP farklı ağlarda kullanılabilir; arayüz seçerek ayırın.\nDHCP ile IP değişirse kaydı güncelleyin. Kayıtlar yereldir.',
+        tk.Label(win, text='Windows ajanı IP olmadan cihaz kimliğiyle çalışır.\nIP yalnız pasif ağ paketlerini eşleştirmek için kullanılır.',
                  bg=SURF, fg=MUT, justify='left').pack(padx=20, pady=12)
         def save():
             if self._save_device(dict(id=device['id'], **{k: v.get() for k, v in fields.items()})):
                 win.destroy()
+                if not editing:
+                    self._pair_device(device['id'])
         self._button(win, 'Kaydet', save, True).pack(fill='x', padx=20, pady=(0, 20))
+
+    def _pair_device(self, identity=None):
+        device = (next((d for d in self.preferences['devices'] if d['id'] == identity), None)
+                  if identity is not None else self._selected_device())
+        if device is None:
+            self._syslog('SİSTEM', 'Önce eşleştirilecek cihazı seçin.')
+            return
+        return PairingDialog(self, device)
 
     def _remove_device(self):
         device = self._selected_device()
@@ -103,7 +115,7 @@ class InventoryPanel:
                 continue
             activity = index.activity(device)
             self._device_rows[device['id']] = activity
-            rows.append((device['id'], [device['name'], device['department'], device['ip'], device['interface'] or 'Tümü',
+            rows.append((device['id'], [device['name'], device['department'], device['ip'] or '—', device['interface'] or 'Tümü',
                 activity['status'], activity['sent_bytes'], activity['received_bytes'], activity['alerts'], activity['last']]))
         replace(self._device_tree, rows)
         self._device_details()
@@ -130,6 +142,9 @@ class InventoryPanel:
     def _follow_device(self):
         device = self._selected_device()
         if device:
+            if not device['ip']:
+                self._syslog('SİSTEM', 'Paket filtresi için IP ekleyin; Windows ajanı IP olmadan çalışır.')
+                return
             suffix = {'Canlı': ' mode=live', 'Simülasyon': ' mode=demo'}.get(self._tracking_scope.get(), '')
             interface = device['interface']
             scope = self._tracking_iface.get()
@@ -151,6 +166,8 @@ class InventoryPanel:
         actions = tk.Frame(page, bg=SURF)
         actions.pack(fill='x', padx=10, pady=6)
         self._button(actions, 'Cihaz ekle', self._edit_device).pack(side='left', padx=(0, 8))
+        self._button(actions, 'Eşleştir / bağlantıyı kontrol et', self._pair_device).pack(side='left', padx=(0, 8))
+        self._button(actions, 'Düzenle', lambda: self._edit_device(True)).pack(side='left', padx=(0, 8))
         self._button(actions, 'Yenile', self._refresh_agent_panel).pack(side='left')
         self._agent_details = scrolledtext.ScrolledText(page, height=9, bg=CARD, fg=TXT, state='disabled')
         self._agent_details.pack(side='bottom', fill='x', padx=10, pady=8)

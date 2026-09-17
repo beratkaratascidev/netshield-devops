@@ -243,3 +243,10 @@ bilgisayarda görünür ajan çalışmalıdır. Gerçek Windows testi bekleyen p
 HTTPS alıcısının güncel bağımlılıkları, SQLite geçişi ve saklama ayarları:
 [Alıcı işletim rehberi](docs/RECEIVER_OPERATIONS.md). Tüm iyileştirmelerin tamamlanma
 durumu: [uygulama takibi](docs/IMPLEMENTATION_STATUS.md).
+
+Windows cihazı eklerken IP artık isteğe bağlıdır. Kaydetme sonrasında açılan
+**Windows cihazını eşleştir** penceresinden HTTPS alıcı adresini girip cihaza özel
+yapılandırma dosyası oluşturabilir, yerel alıcıdaki bildirimi kontrol edebilir ve
+eşleştirmeyi iptal edebilirsiniz. Pencereyi daha sonra **Windows cihaz durumu →
+Eşleştir / bağlantıyı kontrol et** ile açabilirsiniz. Bu akış Windows'a otomatik
+kurulum yapmaz; alıcı ve görünür ajan ayrıca çalıştırılmalıdır.

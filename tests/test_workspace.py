@@ -238,6 +238,60 @@ class WorkspaceTests(unittest.TestCase):
         finally:
             release.set()
 
+    def test_pairing_wizard_without_ip_creates_config_checks_status_and_revokes(self):
+        from netshield.core.enrollment import read_credentials
+        a = self.app
+        device = dict(id='pairing-device', name='Windows PC', department='Dev', ip='', interface='')
+        self.assertTrue(a._save_device(device))
+        a._tracking_tabs.select(a._agent_page)
+        a._agent_tree.selection_set(device['id'])
+        dialog = a._pair_device()
+        self.assertIsNotNone(dialog)
+        def wait():
+            deadline = time.monotonic() + 3
+            while dialog.future is not None:
+                self.root.update()
+                if time.monotonic() > deadline:
+                    self.fail('Pairing job did not finish')
+                time.sleep(.005)
+        dialog.server.set('http://not-secure')
+        dialog.generate_button.invoke()
+        self.assertIn('HTTPS', dialog.status.get())
+        output = Path(a.settings_path).parent / 'client.json'
+        dialog.server.set('https://netshield.example:8443')
+        with patch('netshield.ui.pairing.filedialog.asksaveasfilename', return_value=str(output)):
+            dialog.generate_button.invoke()
+            wait()
+        config = json.loads(output.read_text())
+        self.assertEqual(config['device_id'], device['id'])
+        self.assertNotIn(config['token'], dialog.status.get())
+        dialog.check_button.invoke()
+        wait()
+        self.assertIn('bekleniyor', dialog.status.get())
+        record = dict(received_at=time.time(), boot_time='2026-09-18T08:00:00+00:00', session='locked', events=[])
+        (output.parent / 'agent-status.json').write_text(json.dumps({device['id']: record}))
+        dialog.check_button.invoke()
+        wait()
+        self.assertIn('Bağlı · kilitli', dialog.status.get())
+        dialog.revoke_button.invoke()
+        wait()
+        self.assertNotIn(device['id'], read_credentials(output.parent / 'agent-credentials.json'))
+        self.assertIn('iptal edildi', dialog.status.get())
+        dialog.win.destroy()
+
+    def test_agent_selection_edits_the_visible_device_and_empty_ip_does_not_clear_filter(self):
+        a = self.app
+        first = dict(id='pc-a', name='A', department='Dev', ip='', interface='')
+        second = dict(first, id='pc-b', name='B')
+        self.assertTrue(a._save_device(first))
+        self.assertTrue(a._save_device(second))
+        a._tracking_tabs.select(a._agent_page)
+        a._agent_tree.selection_set('pc-a')
+        self.assertEqual(a._selected_device()['id'], 'pc-a')
+        a._filter_text.set('port=443')
+        a._follow_device()
+        self.assertEqual(a._filter_text.get(), 'port=443')
+
     def test_multiple_interface_selection_and_status_view(self):
         a = self.app
         with patch('netshield.core.motor.get_if_list', return_value=['lan1', 'lan2']):

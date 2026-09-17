@@ -4,32 +4,16 @@ import asyncio
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
-import hashlib
 import hmac
 import json
-import secrets
 import ssl
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from netshield.core.agent_status import validate_status
 from netshield.core.agent_store import AgentStore
-from netshield.core.security import private_write
+from netshield.core.enrollment import digest, read_credentials, enroll, revoke
 from netshield.core.settings import default_path, load_settings
-
-
-def digest(token):
-    return hashlib.sha256(token.encode('ascii')).hexdigest()
-
-
-def read_credentials(path):
-    if not path.exists():
-        return {}
-    data = json.loads(path.read_text(encoding='utf-8'))
-    if not isinstance(data, dict) or len(data) > 500:
-        raise ValueError('Invalid credentials')
-    return data
 
 
 class ConfigurationError(RuntimeError):
@@ -204,12 +188,12 @@ def main():
     parser = argparse.ArgumentParser(description='NetShield Windows agent enrollment / HTTPS receiver')
     parser.add_argument('--settings', type=Path, default=default_path())
     commands = parser.add_subparsers(dest='command', required=True)
-    enroll = commands.add_parser('enroll')
-    enroll.add_argument('--device-id', required=True)
-    enroll.add_argument('--server', required=True, help='https://netshield.company:8443')
-    enroll.add_argument('--output', type=Path, required=True)
-    revoke = commands.add_parser('revoke')
-    revoke.add_argument('--device-id', required=True)
+    enroll_parser = commands.add_parser('enroll')
+    enroll_parser.add_argument('--device-id', required=True)
+    enroll_parser.add_argument('--server', required=True, help='https://netshield.company:8443')
+    enroll_parser.add_argument('--output', type=Path, required=True)
+    revoke_parser = commands.add_parser('revoke')
+    revoke_parser.add_argument('--device-id', required=True)
     serve = commands.add_parser('serve')
     serve.add_argument('--bind', default='127.0.0.1')
     serve.add_argument('--port', type=int, default=8443)
@@ -218,24 +202,14 @@ def main():
     serve.add_argument('--retention-days', type=int, default=30)
     serve.add_argument('--max-inflight', type=int, default=128)
     args = parser.parse_args()
-    path = args.settings.parent / 'agent-credentials.json'
     if args.command in ('enroll', 'revoke'):
-        credentials = read_credentials(path)
-        if args.command == 'revoke':
-            credentials.pop(args.device_id, None)
-        else:
-            settings, error = load_settings(args.settings)
-            if error or args.device_id not in {d['id'] for d in settings['devices']}:
-                parser.error('Device ID must exist in the local inventory')
-            url = urlsplit(args.server)
-            if url.scheme != 'https' or not url.hostname or url.username or url.password or url.query or url.fragment or url.path not in ('', '/'):
-                parser.error('Server must be an HTTPS origin without credentials, path or query')
-            if args.output.exists() or args.output.is_symlink():
-                parser.error('Output already exists; choose a new private file')
-            token = secrets.token_urlsafe(32)
-            private_write(args.output, json.dumps(dict(server=args.server.rstrip('/'), device_id=args.device_id, token=token)))
-            credentials[args.device_id] = digest(token)
-        private_write(path, json.dumps(credentials))
+        try:
+            if args.command == 'enroll':
+                enroll(args.settings, args.device_id, args.server, args.output)
+            else:
+                revoke(args.settings, args.device_id)
+        except (OSError, ValueError) as exc:
+            parser.error(str(exc))
         print('Enrollment updated. Protect the agent configuration; never commit it.')
         return
     try:

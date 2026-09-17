@@ -26,10 +26,19 @@ eşleştirmesini bozmaz, ancak pasif paket filtresinin IP kaydı elle güncellen
 ## 1. Panelde cihaz oluşturun
 
 **Cihazlar ve bağlantılar → Çalışan / cihaz envanteri → Ekle** üzerinden kaydedin.
+Ajan cihazı için IP isteğe bağlıdır; IP yalnız pasif paket eşleştirmesinde kullanılır.
+Kaydetme sonrasında eşleştirme penceresi açılır: alıcı HTTPS adresini girin, yeni
+yapılandırma dosyasını oluşturun ve Windows bilgisayara güvenli biçimde aktarın.
+Dosya oluşturmak mevcut cihaz anahtarını yeniler. Var olan dosyanın üstüne yazılmaz.
+Bu işlem GUI paket raporu dışa aktarımından ayrıdır; cihaz eşleştirme işlemidir.
 **Windows cihaz durumu** sekmesinde kaydı seçince cihaz kimliği görünür. Ajan sekmesi
 canlı/simülasyon paket filtrelerinden bağımsızdır; sahte demo ajan kaydı oluşturulmaz.
 
 ## 2. Alıcıyı hazırlayın (Linux)
+
+GUI eşleştirme penceresinde dosya oluşturduysanız `enroll` komutunu tekrar
+çalıştırmayın; yeni anahtar üretip önceki dosyayı geçersiz kılar. Aşağıdaki `enroll`
+satırı komut satırı kullanımı için alternatiftir. `serve` adımı yine gereklidir.
 
 Kurumsal CA veya güvenilen bir CA tarafından imzalanmış, sunucu DNS adını SAN
 alanında içeren sertifika ve özel anahtar hazırlayın. Windows istemcisi bu CA'ya
