@@ -69,6 +69,7 @@ class App:
         self.trafik  = deque([0]*90, maxlen=90)
         self._geo_pending = set()
         self._traffic_count = 0
+        self._packet_total = 0
         self._traffic_since = time.monotonic()
 
         self._build()
@@ -245,12 +246,14 @@ class App:
 
     # ── Poll (100ms — çok anlık) ───────────
     def _poll(self):
+        packets = self.motor.consume_traffic()
+        self._traffic_count += packets
+        self._packet_total += packets
         try:
             for _ in range(1000):
                 msg = self.q.get_nowait()
                 k   = msg[0]
                 if   k == "OLAY":   self._on_olay(msg[1])
-                elif k == "TRAFIK": self._traffic_count += msg[1]
                 elif k == "LOG":    self._syslog(msg[1], msg[2])
                 elif k == "GEO":    self._on_geo(msg[1], msg[2])
         except queue.Empty:
@@ -261,6 +264,7 @@ class App:
             self.trafik.append(round(self._traffic_count / elapsed))
             self._traffic_count = 0
             self._traffic_since = now
+            self._grafik_ciz()
         self._guncelle()
         self.root.after(100, self._poll)   # 100ms — çok anlık
 
@@ -314,14 +318,13 @@ class App:
     def _guncelle(self):
         self._k_toplam.configure(text=str(self.sayac["toplam"]))
         self._k_flood.configure( text=str(self.sayac.get("FLOOD",0)))
-        self._k_paket.configure( text=str(self.sayac.get("PAKET",0)))
+        self._k_paket.configure( text=str(self._packet_total))
         self._k_ban.configure(   text=str(len(self.banned)))
         self._k_pps.configure(   text=str(self.trafik[-1] if self.trafik else 0))
 
         for tur, lbl in self._stat_lbls.items():
             lbl.configure(text=str(self.sayac.get(tur,0)))
 
-        self._grafik_ciz()
 
     # ── Filtre ─────────────────────────────
     def _filtre_uygula(self):
@@ -413,8 +416,10 @@ class App:
     def _sifirla(self):
         if not messagebox.askyesno("Sıfırla","Tüm sayaçlar ve loglar temizlenecek."): return
         self.sayac.clear(); self.olaylar.clear()
+        self.motor.consume_traffic()
         self.trafik  = deque([0]*90,maxlen=90)
         self._traffic_count = 0
+        self._packet_total = 0
         self._traffic_since = time.monotonic()
         self._log.configure(state="normal")
         self._log.delete("1.0","end")

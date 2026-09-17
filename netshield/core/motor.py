@@ -5,11 +5,13 @@ import threading
 
 from collections import deque, defaultdict
 try:
-    from scapy.all import sniff, IP, TCP, UDP, ICMP, get_if_list
+    from scapy.all import sniff, IP, TCP, UDP, ICMP, get_if_list, conf, ETH_P_ALL
     SCAPY_OK = True
 except ImportError:
     SCAPY_OK = False
     sniff = None
+    conf = None
+    ETH_P_ALL = 3
     IP = TCP = UDP = ICMP = None
 
     def get_if_list():
@@ -27,7 +29,7 @@ class Motor:
     """
     Her ağ arayüzü için ayrı sniff thread'i başlatır.
     Tüm paketler ortak _pkt() fonksiyonundan geçer.
-    GUI ile iletişim sadece queue üzerinden.
+    Olaylar queue, trafik sayısı kilit korumalı sayaç üzerinden aktarılır.
     """
 
     def __init__(self, q: queue.Queue, esik: dict):
@@ -35,6 +37,9 @@ class Motor:
         self.esik = esik
         self._go  = True
         self._packet_lock = threading.Lock()
+        self._traffic_lock = threading.Lock()
+        self._traffic_count = 0
+        self._stop = threading.Event()
         self.sim  = not (SCAPY_OK and is_root())
 
         self.sw_icmp = SW(1.0)
@@ -53,6 +58,8 @@ class Motor:
         self._threads: list[threading.Thread] = []
 
     def baslat(self):
+        if self._threads or self._stop.is_set():
+            return
         if self.sim:
             self.q.put(("LOG","SİSTEM","Motor başladı ▸ SİMÜLASYON MODU"))
             t = threading.Thread(target=self._sim, daemon=True, name="sim")
@@ -67,6 +74,21 @@ class Motor:
 
     def dur(self):
         self._go = False
+        self._stop.set()
+        deadline = time.monotonic() + 1.5
+        for thread in self._threads:
+            thread.join(timeout=max(0, deadline - time.monotonic()))
+
+    def _record_traffic(self, count):
+        with self._traffic_lock:
+            self._traffic_count += count
+
+    def consume_traffic(self):
+        """Return and reset packets since the last UI sample atomically."""
+        with self._traffic_lock:
+            count = self._traffic_count
+            self._traffic_count = 0
+            return count
 
     def _ifaces(self):
         try:
@@ -78,16 +100,23 @@ class Motor:
     # ── Her arayüz için ayrı thread ────────
     def _dinle(self, iface):
         self.q.put(("LOG","SİSTEM",f"Dinleniyor: {iface}"))
+        capture_socket = None
         try:
-            sniff(
-                iface=iface,
-                prn=self._pkt,
-                store=False,
-                stop_filter=lambda _: not self._go,
-                # filter="" — BPF YOK, loopback'te de çalışır
-            )
+            # Keep the socket open between timed polls so packets remain buffered.
+            capture_socket = conf.L2listen(iface=iface, type=ETH_P_ALL)
+            while not self._stop.is_set():
+                sniff(
+                    opened_socket=capture_socket,
+                    prn=self._pkt,
+                    store=False,
+                    timeout=1.0,
+                    stop_filter=lambda _: self._stop.is_set(),
+                )
         except Exception as e:
             self.q.put(("LOG","HATA",f"{iface} dinleme hatası: {e}"))
+        finally:
+            if capture_socket is not None:
+                capture_socket.close()
 
     # ── Paket işleme (tüm arayüzlerden) ───
     def _pkt(self, pkt):
@@ -102,7 +131,7 @@ class Motor:
         ts = time.monotonic()
 
         # Canlı trafik grafiğine paket bilgisini gönder
-        self.q.put(("TRAFIK", 1))
+        self._record_traffic(1)
 
         # ICMP / Ping
         if ICMP in pkt:
@@ -235,8 +264,7 @@ class Motor:
         AGIRLIK    = [10,   8,           8,   7,
                       7,   6,            8,   6,          20]
 
-        while self._go:
-            time.sleep(0.08)
+        while not self._stop.wait(0.08):
             ts = time.monotonic()
             ip = rng.choice(pool)
             sc = rng.choices(SENARYOLAR, weights=AGIRLIK, k=1)[0]
@@ -244,48 +272,48 @@ class Motor:
             if sc == "ping":
                 n = self.sw_icmp.add(ip, ts)
                 self._bildir(ip,"ICMP",f"echo-req count={n}",ts,flood=False)
-                self.q.put(("TRAFIK", 1))
+                self._record_traffic(1)
 
             elif sc == "ping_flood":
                 burst = self.esik["icmp_per_sec"] + rng.randint(3,20)
                 for _ in range(burst): n = self.sw_icmp.add(ip, ts)
                 self._bildir(ip,"ICMP",f"FLOOD {n}/sn",ts,flood=True)
-                self.q.put(("TRAFIK", burst))
+                self._record_traffic(burst)
 
             elif sc == "syn":
                 n = self.sw_syn.add(ip, ts)
                 self._bildir(ip,"SYN",f"→:{rng.randint(1,65535)} count={n}",ts,flood=False)
-                self.q.put(("TRAFIK", 1))
+                self._record_traffic(1)
 
             elif sc == "syn_flood":
                 burst = self.esik["syn_per_sec"] + rng.randint(5,30)
                 for _ in range(burst): n = self.sw_syn.add(ip, ts)
                 self._bildir(ip,"SYN",f"FLOOD {n}/sn",ts,flood=True)
-                self.q.put(("TRAFIK", burst))
+                self._record_traffic(burst)
 
             elif sc == "udp":
                 n = self.sw_udp.add(ip, ts)
                 self._bildir(ip,"UDP",f"→:{rng.randint(1,65535)} count={n}",ts,flood=False)
-                self.q.put(("TRAFIK", 1))
+                self._record_traffic(1)
 
             elif sc == "udp_flood":
                 burst = self.esik["udp_per_sec"] + rng.randint(5,30)
                 for _ in range(burst): n = self.sw_udp.add(ip, ts)
                 self._bildir(ip,"UDP",f"FLOOD {n}/sn",ts,flood=True)
-                self.q.put(("TRAFIK", burst))
+                self._record_traffic(burst)
 
             elif sc == "port_scan":
                 ports = rng.sample(range(1,65535), rng.randint(5,15))
                 for p in ports: self._pt(ip, p, ts)
-                self.q.put(("TRAFIK", len(ports)))
+                self._record_traffic(len(ports))
 
             elif sc == "http_flood":
                 burst = self.esik["http_per_sec"] + rng.randint(5,20)
                 for _ in range(burst): n = self.sw_http.add(ip, ts)
                 self._bildir(ip,"HTTP Flood",f"{n}/sn",ts,flood=True)
-                self.q.put(("TRAFIK", burst))
+                self._record_traffic(burst)
 
             else:
-                self.q.put(("TRAFIK", rng.randint(1,10)))
+                self._record_traffic(rng.randint(1,10))
 
 

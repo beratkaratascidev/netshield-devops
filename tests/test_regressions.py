@@ -1,7 +1,7 @@
 import queue
 import subprocess
 import unittest
-from collections import defaultdict, deque
+from collections import deque
 from types import SimpleNamespace
 from unittest.mock import Mock, mock_open, patch
 
@@ -15,6 +15,9 @@ class AppTests(unittest.TestCase):
     def setUp(self):
         self.app = ids.App.__new__(ids.App)
         self.app.banned = {}
+        self.app.motor = motor.Motor(queue.Queue(), dict(ESIKLER))
+        self.app._packet_total = 0
+        self.app._grafik_ciz = Mock()
         self.app._ban_list = Mock()
         self.app._syslog = Mock()
         self.app._log_yaz = Mock()
@@ -61,15 +64,16 @@ class AppTests(unittest.TestCase):
         a._guncelle = Mock()
         a.root = Mock()
         for _ in range(500):
-            a.q.put(('TRAFIK', 1))
+            a.motor._record_traffic(1)
         with patch.object(ids.time, 'monotonic', return_value=100.5):
             a._poll()
         self.assertEqual(a.trafik[-1], 0)
         for _ in range(500):
-            a.q.put(('TRAFIK', 1))
+            a.motor._record_traffic(1)
         with patch.object(ids.time, 'monotonic', return_value=101.0):
             a._poll()
         self.assertEqual(a.trafik[-1], 1000)
+        self.assertEqual(a._packet_total, 1000)
         with patch.object(ids.time, 'monotonic', return_value=102.0):
             a._poll()
         self.assertEqual(a.trafik[-1], 0)
@@ -83,7 +87,7 @@ class AppTests(unittest.TestCase):
         a._guncelle = Mock()
         a.root = Mock()
         for _ in range(1001):
-            a.q.put(('TRAFIK', 1))
+            a.q.put(('LOG', 'SİSTEM', 'test'))
         with patch.object(ids.time, 'monotonic', return_value=100.1):
             a._poll()
         self.assertEqual(a.q.qsize(), 1)
@@ -91,6 +95,38 @@ class AppTests(unittest.TestCase):
 
 
 class MotorTests(unittest.TestCase):
+    def test_high_volume_traffic_does_not_fill_queue(self):
+        q = queue.Queue()
+        m = motor.Motor(q, dict(ESIKLER))
+        for _ in range(100000):
+            m._record_traffic(1)
+        self.assertTrue(q.empty())
+        self.assertEqual(m.consume_traffic(), 100000)
+        self.assertEqual(m.consume_traffic(), 0)
+
+    def test_simulation_stops_and_start_is_idempotent(self):
+        m = motor.Motor(queue.Queue(), dict(ESIKLER))
+        m.sim = True
+        m.baslat()
+        m.baslat()
+        self.assertEqual(len(m._threads), 1)
+        m.dur()
+        self.assertFalse(m._threads[0].is_alive())
+
+    def test_idle_capture_has_timeout_and_stops(self):
+        m = motor.Motor(queue.Queue(), dict(ESIKLER))
+        def idle_capture(**kwargs):
+            self.assertEqual(kwargs['timeout'], 1.0)
+            m._stop.set()
+        socket = Mock()
+        config = SimpleNamespace(L2listen=Mock(return_value=socket))
+        with patch.object(motor, 'conf', config), \
+                patch.object(motor, 'sniff', side_effect=idle_capture) as capture:
+            m._dinle('test-interface')
+        capture.assert_called_once()
+        self.assertIs(capture.call_args.kwargs['opened_socket'], socket)
+        socket.close.assert_called_once()
+
     def events_for(self, payload):
         q = queue.Queue()
         m = motor.Motor(q, dict(ESIKLER))
