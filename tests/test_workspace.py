@@ -87,6 +87,43 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(a._packet_tree.get_children(), ('1', '2'))
         self.assertIn('192.168.1.99', json.loads(Path(a.settings_path).read_text())['watchlist'])
 
+    def test_employee_inventory_persistence_filter_and_removal(self):
+        a = self.app
+        a._notebook.select(a._tracking_page)
+        a._tracking_tabs.select(3)
+        device = dict(id='employee1', name='Test Yazılımcı', department='Yazılım', ip='192.0.2.10', interface='lan1')
+        self.assertTrue(a._save_device(device))
+        self.assertEqual(a._device_tree.set('employee1', 'status'), 'Gözlenmedi')
+        packet = dict(ts='12:00:00', src=device['ip'], dst='192.0.2.20', proto='TCP',
+                      length=60, info='', interface='lan1', simulated=False)
+        for changes in ({}, {'simulated': True}, {'interface': 'lan2'}):
+            a._on_packet(dict(packet, **changes))
+        a._tracking_scope.set('Canlı')
+        a._change_tracking_scope()
+        self.assertEqual(a._device_tree.set('employee1', 'sent'), '60')
+        a._device_tree.selection_set('employee1')
+        a._device_details()
+        self.assertIn('Test Yazılımcı', a._device_detail.get('1.0', 'end'))
+        a._follow_tracking()
+        self.assertEqual(a._packet_tree.get_children(), ('1',))
+        a._notebook.select(a._tracking_page)
+        a._tracking_iface.set('lan2')
+        a._change_tracking_scope()
+        self.assertEqual(a._device_tree.set('employee1', 'status'), 'Gözlenmedi')
+        a._follow_device()
+        self.assertEqual(a._packet_tree.get_children(), ())
+        a._notebook.select(a._tracking_page)
+        a._device_search.set('bulunamayan')
+        self.assertEqual(a._device_tree.get_children(), ())
+        a._device_search.set('Yazılım')
+        self.assertEqual(a._device_tree.get_children(), ('employee1',))
+        a._device_tree.selection_set('employee1')
+        self.assertEqual(json.loads(Path(a.settings_path).read_text())['devices'], [device])
+        with patch('netshield.ui.inventory.messagebox.askyesno', return_value=True):
+            a._remove_device()
+        self.assertEqual(a.preferences['devices'], [])
+        self.assertEqual(a._device_tree.get_children(), ())
+
     def test_multiple_interface_selection_and_status_view(self):
         a = self.app
         with patch('netshield.core.motor.get_if_list', return_value=['lan1', 'lan2']):

@@ -4,6 +4,7 @@ import os
 import tempfile
 import ipaddress
 from pathlib import Path
+from netshield.core.inventory import validate_devices
 from netshield.config import ESIKLER
 from netshield.core.security import validate_security
 
@@ -29,7 +30,7 @@ def validate_settings(data):
         raise ValueError('En fazla 100 adres takip edilebilir.')
     watched = list(dict.fromkeys(str(ipaddress.ip_address(ip)) for ip in watchlist))
     return dict(version=1, thresholds={k: thresholds[k] for k in ESIKLER},
-                density=density, watchlist=watched, security=validate_security(data.get('security', {})))
+                density=density, watchlist=watched, devices=validate_devices(data.get('devices', [])), security=validate_security(data.get('security', {})))
 
 
 def load_settings(path):

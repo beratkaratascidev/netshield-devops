@@ -90,3 +90,17 @@ Bu test, üçüncü taraf kütüphaneler veya işletim sistemi için kapsamlı b
 sızıntısı sertifikası değildir. Gerçek firewall ve canlı ağ değişiklikleri
 test sırasında yapılmaz. Kurumsal yayından önce ayrıcalık ayrımı, bağımlılık
 incelemesi ve izole ortamda süreç ağ trafiği doğrulaması gerekir.
+
+### Yerel çalışan / cihaz envanteri
+
+Ad/cihaz adı, bölüm, IP ve isteğe bağlı arayüz eşleştirmeleri kullanıcıya ait
+`settings.json` içinde atomik olarak, `0600` izinleriyle saklanır. Bunlar kişisel
+veri içerebilir; dosya şifrelenmez ve bilgisayarın yetkili kullanıcısı/root tarafından
+okunabilir. Envanter girdileri düzenlenebilir veya silinebilir; silme yedekleri
+ya da dosya sistemindeki eski kopyaları güvenli biçimde yok etme garantisi vermez.
+
+Envanter dışarıya gönderilmez ve mevcut JSON/HTML trafik dışa aktarımlarına ad/bölüm
+alanları eklenmez. Trafik yakalama ve güvenlik politikası değişmez. IP kaydı tarama,
+bağlantı denemesi veya uzak bilgisayara ajan kurulumu başlatmaz. Ağ görünürlüğü ve
+IP atamasının doğruluğu yönetici tarafından sağlanmalıdır. Simülasyon kayıtları
+mod filtresiyle ayrılabilir; çalışan takibinde **Canlı** kapsamını seçin.

@@ -9,7 +9,10 @@ import shlex
 from netshield.ui.theme import BG, SURF, CARD, TXT, MUT, ACC, GRN, YLW, RED, TUR_RENK
 
 
-class AnalysisPanels:
+from netshield.ui.inventory import InventoryPanel
+
+
+class AnalysisPanels(InventoryPanel):
     def _build_alarm_tools(self, parent):
         bar = tk.Frame(parent, bg=SURF, padx=8, pady=8)
         bar.pack(fill='x')
@@ -47,6 +50,7 @@ class AnalysisPanels:
         self._flow_tree = self._table(flows, [('interface', 'Arayüz', 90), ('proto', 'Protokol', 80), ('a', 'Uç A', 210),
                                              ('b', 'Uç B', 210), ('packets', 'Paket', 70),
                                              ('bytes', 'Bayt', 100), ('last', 'Son görülen', 115)])
+        self._build_inventory(tabs)
         self._flow_rows = {}
         for tree in (self._host_tree, self._watch_tree):
             tree.bind('<Double-1>', lambda _, t=tree: self._follow_host(t))
@@ -198,6 +202,7 @@ class AnalysisPanels:
         self._flow_rows = {str((f['interface'], f['protocol'], f['a'], f['b'])): f for f in summary['conversations']}
         replace(self._flow_tree, [(key, [f['interface'], f['protocol'], self._endpoint(f['a']), self._endpoint(f['b']),
                                        f['packets'], f['bytes'], f['last']]) for key, f in self._flow_rows.items()])
+        self._refresh_inventory(packets, alerts, replace)
         protocols = '  ·  '.join(f'{name}: {count}' for name, count in summary['protocols'].most_common(6))
         self._tracking_caption.configure(text=f"{scope} · {self._tracking_iface.get()} · Önizleme kapsamı: {len(packets)} paket · {len(summary['hosts'])} IP · {len(self._flow_rows)} bağlantı\n{protocols or 'Henüz trafik yok.'} · IP toplamları seçili arayüz kapsamındadır")
         self._tracking_dirty = False
@@ -213,7 +218,9 @@ class AnalysisPanels:
 
     def _follow_tracking(self):
         index = self._tracking_tabs.index('current')
-        if index == 1:
+        if index == 3:
+            self._follow_device()
+        elif index == 1:
             self._follow_flow()
         else:
             self._follow_host(self._host_tree if index == 0 else self._watch_tree)

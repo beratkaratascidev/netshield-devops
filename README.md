@@ -211,3 +211,23 @@ adaptörler gerekir. `lo` yalnızca bilgisayar içi trafiktir. Uzak şubelerdeki
 bu uygulamaya otomatik bağlanmaz; uzaktan sensör/ajan alımı ve yeni ağ gönderim
 özelliği eklenmemiştir. Bu sürümde canlı yakalama root kontrolünü gerektirir.
 Scapy eksikliği ve yetki eksikliği artık günlükte ayrı mesajlarla belirtilir.
+
+### Çalışan / cihaz envanteri
+
+**Cihazlar ve bağlantılar → Çalışan / cihaz envanteri → Ekle** üzerinden ad/cihaz adı,
+bölüm ve IPv4/IPv6 adresi kaydedilir. İsteğe bağlı yakalama arayüzü aynı özel IP'nin
+farklı ağlarda kullanıldığı durumları ayırır. Ad, bölüm veya IP ile arama; düzenleme
+ve silme desteklenir. Bir çalışan için birden fazla cihaz ayrı kayıtlarla eklenebilir.
+
+Seçilen kayıtta gönderilen/alınan baytlar, paket sayıları, bağlantı uçları/portları,
+protokoller ve ilişkili alarmlar görülür. Çift tıklama veya **Paketleri göster**,
+IP, arayüz ve seçili canlı/simülasyon kapsamıyla paketleri filtreler. Sayaçlar yalnızca
+bellekte tutulan sonlu önizleme penceresine aittir; geçmiş kullanım raporu değildir.
+**Gözlenmedi**, cihazın çevrimdışı olduğunu göstermez. Alarm ilişkisi cihazın saldırgan
+olduğunu kanıtlamaz; kaynak veya hedef olduğu kayıtları kapsar.
+
+IP eklemek başka bilgisayara erişim sağlamaz. Şirket trafiğinin yakalama noktasına
+ulaşması için uygun SPAN/port aynalama, TAP veya ağ geçidi görünürlüğü gerekir.
+Normal bir switch bağlantısı diğer bilgisayarların tüm trafiğini göstermez.
+DHCP adres değişiklikleri elle güncellenmelidir; IP eşleştirmesi kişi kimliğini
+doğrulamaz. Ekran, klavye, dosya içeriği veya uzaktan ajan takibi yapılmaz.
