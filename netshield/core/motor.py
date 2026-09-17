@@ -1,4 +1,5 @@
 import time
+import re
 import queue
 import threading
 
@@ -33,6 +34,7 @@ class Motor:
         self.q    = q
         self.esik = esik
         self._go  = True
+        self._packet_lock = threading.Lock()
         self.sim  = not (SCAPY_OK and is_root())
 
         self.sw_icmp = SW(1.0)
@@ -89,6 +91,10 @@ class Motor:
 
     # ── Paket işleme (tüm arayüzlerden) ───
     def _pkt(self, pkt):
+        with self._packet_lock:
+            self._process_packet(pkt)
+
+    def _process_packet(self, pkt):
         if not self._go or IP not in pkt:
             return
 
@@ -125,8 +131,13 @@ class Motor:
                     flood=(n >= self.esik["syn_per_sec"])
                 )
 
-            # HTTP trafiği
-            if dport in HTTP_PORTS:
+            # Count visible HTTP/1 request lines, not ACKs or TLS packets.
+            # Stream reassembly and encrypted HTTP are not supported.
+            payload = bytes(pkt[TCP].payload)
+            if dport in HTTP_PORTS and re.match(
+                rb"^(GET|HEAD|POST|PUT|DELETE|CONNECT|OPTIONS|TRACE|PATCH) [^ \r\n]+ HTTP/1\.[01]\r\n",
+                payload,
+            ):
                 n = self.sw_http.add(src, ts)
                 if n >= self.esik["http_per_sec"]:
                     self._bildir(
@@ -189,7 +200,6 @@ class Motor:
             d.clear(); s.clear()
 
     # ── Bildirim (cooldown korumalı) ───────
-       # ── Bildirim (cooldown korumalı) ───────
     def _bildir(self, ip, tur, detay, ts, flood=False):
         tip = "FLOOD" if flood else "PAKET"
 

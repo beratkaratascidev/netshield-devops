@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import os, sys, json, time, queue, socket, threading, subprocess, urllib.request
+import os, sys, time, queue, threading, subprocess
+import ipaddress
+from html import escape
 from collections import deque, defaultdict
 from datetime import datetime
-from netshield.core.sliding_window import SW
 from netshield.config import ESIKLER
-from netshield.net.utils import is_private
-from netshield.core.motor import Motor
+from netshield.net.utils import is_private, is_root, get_cached_geo
+from netshield.core.motor import Motor, SCAPY_OK
 from netshield.net.utils import geo_lookup
 
 import tkinter as tk
@@ -22,35 +23,13 @@ try:
 except Exception:
     MPL_OK = False
 
-try:
-    from scapy.all import sniff, IP, TCP, UDP, ICMP, get_if_list
-    SCAPY_OK = True
-except Exception:
-    SCAPY_OK = False
-
 # ══════════════════════════════════════════
 #  SABİTLER
 # ══════════════════════════════════════════
 TITLE    = " DDO IDS "
-def is_root():
-    try:    return os.geteuid() == 0
-    except: return False
-
-
 def now_str():
     return datetime.now().strftime("%H:%M:%S")
 
-def ts_str():
-    return datetime.now().strftime("%H:%M:%S.%f")[:-4]
-
-# ══════════════════════════════════════════
-#  SLIDING WINDOW
-# ══════════════════════════════════════════
-
-
-# ══════════════════════════════════════════
-#  TESPİT MOTORU
-# ══════════════════════════════════════════
 BG   = "#0a0e17"
 SURF = "#0f1520"
 CARD = "#141e2e"
@@ -89,6 +68,8 @@ class App:
         self.sayac   = defaultdict(int)      # tur → count
         self.trafik  = deque([0]*90, maxlen=90)
         self._geo_pending = set()
+        self._traffic_count = 0
+        self._traffic_since = time.monotonic()
 
         self._build()
         self._motor_baslat()
@@ -265,15 +246,21 @@ class App:
     # ── Poll (100ms — çok anlık) ───────────
     def _poll(self):
         try:
-            while True:
+            for _ in range(1000):
                 msg = self.q.get_nowait()
                 k   = msg[0]
                 if   k == "OLAY":   self._on_olay(msg[1])
-                elif k == "TRAFIK": self.trafik.append(msg[1])
+                elif k == "TRAFIK": self._traffic_count += msg[1]
                 elif k == "LOG":    self._syslog(msg[1], msg[2])
                 elif k == "GEO":    self._on_geo(msg[1], msg[2])
         except queue.Empty:
             pass
+        now = time.monotonic()
+        elapsed = now - self._traffic_since
+        if elapsed >= 1.0:
+            self.trafik.append(round(self._traffic_count / elapsed))
+            self._traffic_count = 0
+            self._traffic_since = now
         self._guncelle()
         self.root.after(100, self._poll)   # 100ms — çok anlık
 
@@ -388,7 +375,7 @@ class App:
         e.pack(fill="x",padx=14); e.focus()
         def _ok():
             ip = e.get().strip()
-            try: socket.inet_aton(ip)
+            try: ip = str(ipaddress.IPv4Address(ip))
             except: messagebox.showerror("Hata","Geçerli IPv4 girin.",parent=win); return
             self._ban_ip(ip,"Manuel"); win.destroy()
         tk.Button(win,text="Banla",command=_ok,bg=RED,fg=WHT,
@@ -397,16 +384,15 @@ class App:
 
     def _ban_ip(self, ip, sebep):
         if ip in self.banned: return
-        ok = True
         try:
             subprocess.run(["sudo","iptables","-A","INPUT","-s",ip,"-j","DROP"],
                            check=True,timeout=5,capture_output=True)
         except Exception as ex:
-            ok = False
             self._syslog("HATA",f"iptables başarısız ({ip}): {ex}")
+            return
         self.banned[ip] = {"tur":sebep,"ts":now_str()}
         self._ban_list.insert("end", f"{ip}  [{sebep}]")
-        durum = "banlandı" if ok else "kaydedildi (iptables hatası)"
+        durum = "banlandı"
         self._log_yaz(f"[{now_str()}] [BAN] {ip} {durum} — {sebep}\n","BAN")
 
     def _ban_kaldir(self):
@@ -419,6 +405,7 @@ class App:
                            check=True,timeout=5,capture_output=True)
         except Exception as ex:
             self._syslog("HATA",f"Kural silinemedi ({ip}): {ex}")
+            return
         self.banned.pop(ip,None)
         self._ban_list.delete(sel[0])
         self._log_yaz(f"[{now_str()}] [OK] {ip} ban listesinden kaldırıldı.\n","OK")
@@ -427,6 +414,8 @@ class App:
         if not messagebox.askyesno("Sıfırla","Tüm sayaçlar ve loglar temizlenecek."): return
         self.sayac.clear(); self.olaylar.clear()
         self.trafik  = deque([0]*90,maxlen=90)
+        self._traffic_count = 0
+        self._traffic_since = time.monotonic()
         self._log.configure(state="normal")
         self._log.delete("1.0","end")
         self._log.configure(state="disabled")
@@ -460,9 +449,9 @@ class App:
         # Geo cache
         geo_tablo = ""
         for ip, cnt in top_ip:
-            geo = _geo_cache.get(ip, {})
-            ulke = geo.get("country","-"); sehir = geo.get("city","-")
-            isp  = geo.get("isp","-")
+            geo = get_cached_geo(ip)
+            ulke = escape(geo.get("country","-")); sehir = escape(geo.get("city","-"))
+            isp  = escape(geo.get("isp","-"))
             geo_tablo += f"""
             <tr>
               <td>{ip}</td>

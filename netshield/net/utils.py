@@ -13,6 +13,12 @@ _geo_cache: dict[str, dict[str, str]] = {}
 _geo_lock = threading.Lock()
 
 
+def get_cached_geo(ip: str) -> dict[str, str]:
+    """Return a snapshot without exposing the shared mutable cache."""
+    with _geo_lock:
+        return dict(_geo_cache.get(ip, {}))
+
+
 def is_root() -> bool:
     """Programın root yetkisiyle çalışıp çalışmadığını döndürür."""
     return hasattr(os, "geteuid") and os.geteuid() == 0
