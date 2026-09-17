@@ -124,6 +124,31 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(a.preferences['devices'], [])
         self.assertEqual(a._device_tree.get_children(), ())
 
+    def test_windows_status_panel_uses_device_identity_and_ignores_packet_filters(self):
+        import time
+        a = self.app
+        device = dict(id='windows1', name='Test Windows', department='Yazılım', ip='192.0.2.10', interface='lan1')
+        self.assertTrue(a._save_device(device))
+        a._tracking_scope.set('Simülasyon')
+        record = dict(received_at=time.time(), boot_time='2026-09-17T08:00:00+00:00', session='locked',
+                      events=[dict(id='a' * 32, kind='session_lock', time='2026-09-17T09:00:00+00:00')])
+        path = Path(a.settings_path).parent / 'agent-status.json'
+        path.write_text(json.dumps({'windows1': record}))
+        a._refresh_agent_panel()
+        self.assertEqual(a._agent_tree.set('windows1', 'state'), 'Bağlı · kilitli')
+        a._agent_tree.selection_set('windows1')
+        a._show_agent_details()
+        self.assertIn('Cihaz kimliği: windows1', a._agent_details.get('1.0', 'end'))
+        self.assertIn('Oturum kilitlendi', a._agent_details.get('1.0', 'end'))
+        record['received_at'] -= 100
+        path.write_text(json.dumps({'windows1': record}))
+        a._refresh_agent_panel()
+        self.assertIn('kapanış bilinmiyor', a._agent_tree.set('windows1', 'state'))
+        path.write_text('{corrupt')
+        a._refresh_agent_panel()
+        self.assertEqual(a._agent_tree.set('windows1', 'state'), 'Ajan verisi yok')
+        self.assertIn('okunamadı', a._agent_notice.cget('text'))
+
     def test_multiple_interface_selection_and_status_view(self):
         a = self.app
         with patch('netshield.core.motor.get_if_list', return_value=['lan1', 'lan2']):

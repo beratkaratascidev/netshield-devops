@@ -218,6 +218,8 @@ class AnalysisPanels(InventoryPanel):
 
     def _follow_tracking(self):
         index = self._tracking_tabs.index('current')
+        if index == 4:
+            return
         if index == 3:
             self._follow_device()
         elif index == 1:

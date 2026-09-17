@@ -2,7 +2,7 @@
 
 ## Kapsam
 
-NetShield seçilen arayüzde pasif trafik analizi yapar. Kendi uygulama kodunda
+NetShield seçilen arayüzde pasif trafik analizi yapar. Masaüstü pasif analiz bileşeninde
 harici GeoIP, telemetri, bulut aktarımı, aktif tarama, uzaktan güncelleme veya
 raporları tarayıcıda otomatik açma yolu bulunmaz. Diğer programların internet
 bağlantısını, işletim sistemi trafiğini veya kullanıcının genel IP'sini değiştirmez.
@@ -19,7 +19,7 @@ RAM'e hiç girmediği veya Python belleğinden güvenli silindiği iddia edilmez
 | Yerel maskeli JSON/HTML | Açık | Kapalı |
 | Maskeli özeti panoya kopyalama | Kapalı | Kapalı |
 | Manuel IPv4 INPUT kuralı | Kapalı | Kapalı |
-| Harici sorgu / otomatik ağ gönderimi | Uygulama özelliği yok | Uygulama özelliği yok |
+| Pasif analiz bileşeninden harici sorgu / ağ gönderimi | Yok | Yok |
 
 Bireysel profilde pano ve firewall açıkça etkinleştirilebilir. Firewall için
 ayrıca root yetkili canlı oturum gerekir; simülasyonda ve normal kullanıcıyla
@@ -104,3 +104,20 @@ alanları eklenmez. Trafik yakalama ve güvenlik politikası değişmez. IP kayd
 bağlantı denemesi veya uzak bilgisayara ajan kurulumu başlatmaz. Ağ görünürlüğü ve
 IP atamasının doğruluğu yönetici tarafından sağlanmalıdır. Simülasyon kayıtları
 mod filtresiyle ayrılabilir; çalışan takibinde **Canlı** kapsamını seçin.
+
+### İsteğe bağlı Windows ajanı ve HTTPS alıcısı
+
+Ayrı başlatılan Windows ajanı, yalnızca yöneticinin yapılandırdığı HTTPS sunucusuna
+cihaz durum metaverisi gönderir. Bu, pasif analizden farklı ve açıkça etkinleştirilen
+bir ağ aktarımıdır; bulut hizmeti kullanılmaz. Ajan/alıcının çalıştırılması GUI'deki
+Bireysel/Kurumsal dışa aktarım politikasından bağımsızdır. Kurum bu özelliği
+istemiyorsa ajan/alıcının dağıtımını ve ağ erişimini OS katmanında engellemelidir.
+GUI kendi başına alıcı başlatmaz veya ajana bağlanmaz; yerel durum dosyasını okur.
+
+Ajan anahtarları cihaz başınadır; sunucuda yalnız özetleri saklanır. HTTPS TLS 1.2+
+ve sertifika doğrulaması zorunludur. Anahtar iptali ve envanter üyeliği her istekte
+kontrol edilir. İstek boyutu/olay sayısı sınırlıdır; serbest içerik kabul edilmez.
+Cihazın bildirdiği olay saatleri güvenilir sunucu saati olarak değerlendirilmez;
+son görülme sunucunun alım saatidir. Bu pilot donanımsal kimlik doğrulama, çok
+kiracılı RBAC, servis sürekliliği veya kurcalamaya dayanıklı denetim kaydı sağlamaz.
+Saklama ve Windows pilot kontrol adımları: [ajan rehberi](agents/windows/README.md).

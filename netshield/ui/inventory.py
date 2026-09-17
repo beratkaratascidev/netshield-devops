@@ -1,6 +1,9 @@
 """Local directory UI; no remote access, probing or background persistence."""
 import shlex
 import uuid
+import time
+from datetime import datetime
+from netshield.core.agent_status import read_snapshot, status_label
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 from netshield.core.inventory import device_activity
@@ -28,6 +31,7 @@ class InventoryPanel:
         self._device_tree = self._table(page, [('name', 'Ad / cihaz', 140), ('department', 'Bölüm', 110),
             ('ip', 'IP', 130), ('interface', 'Arayüz', 90), ('status', 'Gözlem', 100),
             ('sent', 'Giden bayt', 90), ('received', 'Gelen bayt', 90), ('alerts', 'Alarm', 60), ('last', 'Son görülen', 95)])
+        self._build_agent_panel(tabs)
         self._device_rows = {}
         self._device_tree.bind('<<TreeviewSelect>>', lambda _: self._device_details())
         self._device_tree.bind('<Double-1>', lambda _: self._follow_device())
@@ -121,3 +125,57 @@ class InventoryPanel:
             if scope != 'Tüm arayüzler' and scope != interface:
                 suffix += ' iface=' + shlex.quote(scope)
             self._apply_expression('ip=' + device['ip'] + suffix)
+
+    def _build_agent_panel(self, tabs):
+        page = tk.Frame(tabs, bg=SURF)
+        tabs.add(page, text='Windows cihaz durumu')
+        tk.Label(page, text='HTTPS ajan bildirimi · IP yerine cihaz kimliği · ağ yakalamadan bağımsız',
+                 bg=SURF, fg=MUT, padx=10, pady=10).pack(anchor='w')
+        self._agent_notice = tk.Label(page, text='Alıcı ayrı başlatılır; otomatik ağ bağlantısı açılmaz.', bg=SURF, fg=MUT)
+        self._agent_notice.pack(anchor='w', padx=10)
+        self._button(page, 'Yenile', self._refresh_agent_panel).pack(anchor='w', padx=10, pady=6)
+        self._agent_details = scrolledtext.ScrolledText(page, height=9, bg=CARD, fg=TXT, state='disabled')
+        self._agent_details.pack(side='bottom', fill='x', padx=10, pady=8)
+        self._agent_tree = self._table(page, [('name', 'Ad / cihaz', 130), ('department', 'Bölüm', 100),
+            ('state', 'Ajan durumu', 270), ('seen', 'Son bildirim', 165), ('boot', 'Windows açılış bildirimi', 205)])
+        self._agent_records = {}
+        self._agent_tree.bind('<<TreeviewSelect>>', lambda _: self._show_agent_details())
+        self._agent_refreshed = 0
+        tabs.bind('<<NotebookTabChanged>>', lambda _: self._refresh_agent_panel())
+
+    def _refresh_agent_panel(self):
+        if not hasattr(self, '_agent_tree'):
+            return
+        self._agent_refreshed = time.monotonic()
+        self._agent_records, error = read_snapshot(self.settings_path)
+        self._agent_notice.configure(text=error or 'Son durum yerel alıcıdan okunur. Bağlantı kaybı bilgisayarın kapandığını kanıtlamaz.')
+        wanted = {d['id'] for d in self.preferences['devices']}
+        for key in set(self._agent_tree.get_children()) - wanted:
+            self._agent_tree.delete(key)
+        for device in self.preferences['devices']:
+            record = self._agent_records.get(device['id'])
+            values = (device['name'], device['department'], status_label(record),
+                      datetime.fromtimestamp(record['received_at']).strftime('%Y-%m-%d %H:%M:%S') if record else '—',
+                      record['boot_time'] if record else '—')
+            if self._agent_tree.exists(device['id']):
+                self._agent_tree.item(device['id'], values=values)
+            else:
+                self._agent_tree.insert('', 'end', iid=device['id'], values=values)
+        self._apply_table_order(self._agent_tree)
+        self._show_agent_details()
+
+    def _show_agent_details(self):
+        selection = self._agent_tree.selection()
+        text = 'Envanterden bir cihaz ekleyin; eşleştirme için kayıt kimliği burada görünür.\nKurulum: agents/windows/README.md'
+        if selection:
+            identity = selection[0]
+            record = self._agent_records.get(identity)
+            text = f'Cihaz kimliği: {identity}\nSon 100 bildirilen olay · zamanlar cihaz saatindendir.\n'
+            labels = dict(agent_started='Ajan başladı', agent_stopped='Ajan durduruldu (PC kapanışı değildir)',
+                          session_lock='Oturum kilitlendi', session_unlock='Oturum kilidi açıldı',
+                          session_logoff='Oturum kapatma bildirimi', suspend='Uyku bildirimi', resume='Uyanma bildirimi')
+            text += '\n'.join(f"{event['time']} · {labels[event['kind']]}" for event in reversed(record['events'])) if record else 'Henüz ajan bildirimi yok.'
+        self._agent_details.configure(state='normal')
+        self._agent_details.delete('1.0', 'end')
+        self._agent_details.insert('1.0', text)
+        self._agent_details.configure(state='disabled')

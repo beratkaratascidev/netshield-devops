@@ -113,6 +113,8 @@ class App(WorkspaceUI):
             self._traffic_since = now
             self._grafik_ciz()
             self._refresh_tracking()
+            if hasattr(self, '_agent_tree') and time.monotonic() - self._agent_refreshed >= 5:
+                self._refresh_agent_panel()
             self._resort_tables()
         self._guncelle()
         if self._autoscroll.get():

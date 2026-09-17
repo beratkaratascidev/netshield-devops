@@ -231,3 +231,11 @@ ulaşması için uygun SPAN/port aynalama, TAP veya ağ geçidi görünürlüğ�
 Normal bir switch bağlantısı diğer bilgisayarların tüm trafiğini göstermez.
 DHCP adres değişiklikleri elle güncellenmelidir; IP eşleştirmesi kişi kimliğini
 doğrulamaz. Ekran, klavye, dosya içeriği veya uzaktan ajan takibi yapılmaz.
+
+### Windows bilgisayarın kendi durumunu takip etme
+
+İsteğe bağlı Windows ajanı ve HTTPS alıcısı eklendi. **Cihazlar ve bağlantılar →
+Windows cihaz durumu** sekmesi; cihaz kimliğine göre açılış bildirimi, son bağlantı
+ve kilit/uyku olaylarını gösterir. IP üzerinden uzaktan erişim gerektirmez; Windows
+bilgisayarda görünür ajan çalışmalıdır. Gerçek Windows testi bekleyen pilot sürümdür.
+[Kurulum, sınırlar ve pilot kontrolü](agents/windows/README.md).

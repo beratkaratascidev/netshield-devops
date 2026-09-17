@@ -2,3 +2,8 @@ __pycache__/
 *.pyc
 ids_backup.py
 *.bak
+
+agent-config*.json
+agent-credentials.json
+agent-status.json
+*.key
