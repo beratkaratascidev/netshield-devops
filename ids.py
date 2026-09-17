@@ -63,7 +63,7 @@ class App(WorkspaceUI):
 
     def _motor_baslat(self):
         simulation = self._mode.get() == 'Simülasyon'
-        self.motor = Motor(self.q, self.esik, iface=self._iface.get() or None, simulation=simulation)
+        self.motor = Motor(self.q, self.esik, iface=self._selected_interfaces or None, simulation=simulation)
         self.motor.baslat()
         running = self.motor.status != 'Hata'
         self._capture_btn.configure(text='■ Durdur' if running else '▶ Başlat')
@@ -157,11 +157,13 @@ class App(WorkspaceUI):
         for kind, label in self._stat_lbls.items():
             label.configure(text=str(self.sayac.get(kind, 0)))
         self._mod_lbl.configure(text=f'● {self.motor.status.upper()}',
-                                fg=RED if self.motor.status == 'Hata' else YLW if self.motor.sim else GRN)
+                                fg=RED if self.motor.status == 'Hata' else YLW if self.motor.sim or self.motor.status == 'Kısmi canlı' else GRN)
         if self.motor.status == 'Hata':
             self._capture_btn.configure(text='▶ Başlat')
             self._mode_box.configure(state='readonly')
             self._iface_box.configure(state='readonly')
+        if hasattr(self, '_interfaces_tree'):
+            self._refresh_interface_status()
         dropped = self._preview_dropped_total + self.motor.preview_dropped
         event_dropped = self._event_dropped_total + self.motor.event_dropped
         self._status.configure(text=f"{self._iface.get() or 'Arayüz seçilmedi'}  ·  {len(self._packet_tree.get_children())}/{len(self._packets)} paket görünür"

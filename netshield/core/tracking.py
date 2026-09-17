@@ -19,8 +19,8 @@ def summarize(packets, alerts, watched=()):
             host(ip)['last'] = p['ts']
         ends = sorted(((src, p.get('sport')), (dst, p.get('dport'))),
                       key=lambda endpoint: (endpoint[0], str(endpoint[1])))
-        key = (p.get('transport', p['proto']), *ends)
-        flow = conversations.setdefault(key, dict(protocol=key[0], a=ends[0], b=ends[1],
+        key = (p.get('interface', ''), p.get('transport', p['proto']), *ends)
+        flow = conversations.setdefault(key, dict(interface=key[0], protocol=key[1], a=ends[0], b=ends[1],
                                                    packets=0, bytes=0, last='—'))
         flow['packets'] += 1
         flow['bytes'] += size

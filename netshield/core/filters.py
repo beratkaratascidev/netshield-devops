@@ -2,7 +2,7 @@
 import ipaddress
 import shlex
 
-FIELDS = {'src', 'dst', 'ip', 'proto', 'port', 'sport', 'dport', 'info', 'flow', 'mode'}
+FIELDS = {'src', 'dst', 'ip', 'proto', 'port', 'sport', 'dport', 'info', 'flow', 'mode', 'iface'}
 
 
 def compile_filter(expression):
@@ -60,6 +60,9 @@ def compile_filter(expression):
             elif field in ('port', 'sport', 'dport'):
                 ports = (packet.get('sport'), packet.get('dport')) if field == 'port' else (packet.get(field),)
                 if int(value) not in ports:
+                    return False
+            elif field == 'iface':
+                if value != str(packet.get('interface', '')).casefold():
                     return False
             elif field == 'mode':
                 if bool(packet.get('simulated')) != (value == 'demo'):

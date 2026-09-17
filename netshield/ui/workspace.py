@@ -58,10 +58,13 @@ class WorkspaceUI(AnalysisPanels):
         interfaces = get_if_list() if SCAPY_OK else []
         default = next((i for i in interfaces if i != 'lo'), interfaces[0] if interfaces else '')
         self._iface = tk.StringVar(value=default)
+        self._selected_interfaces = [default] if default else []
         tk.Label(toolbar, text='Arayüz', bg=SURF, fg=MUT).pack(side='left', padx=6)
         self._iface_box = ttk.Combobox(toolbar, textvariable=self._iface, values=interfaces,
                                        width=18, state='readonly')
-        self._iface_box.pack(side='left', padx=(0, 10))
+        self._iface_box.pack(side='left', padx=(0, 6))
+        self._iface_box.bind('<<ComboboxSelected>>', lambda _: setattr(self, '_selected_interfaces', [self._iface.get()]))
+        self._button(toolbar, 'Ağlar', self._choose_interfaces).pack(side='left', padx=(0, 6))
         self._capture_btn = self._button(toolbar, '■ Durdur', self._toggle_capture, primary=True)
         self._capture_btn.pack(side='left')
         self._button(toolbar, 'Eşikler', self._thresholds).pack(side='left', padx=8)
@@ -125,7 +128,7 @@ class WorkspaceUI(AnalysisPanels):
         self._notebook.add(alert_page, text='Alarmlar')
         self._notebook.add(log_page, text='Sistem günlüğü')
         self._packet_tree = self._table(packet_page, [
-            ('id', 'No.', 55), ('ts', 'Zaman', 110), ('src', 'Kaynak', 140),
+            ('id', 'No.', 55), ('ts', 'Zaman', 110), ('interface', 'Arayüz', 90), ('src', 'Kaynak', 140),
             ('dst', 'Hedef', 140), ('proto', 'Protokol', 75), ('mode', 'Mod', 80), ('length', 'Bayt', 55), ('info', 'Bilgi', 310)])
         for protocol_name, color in {'TCP': ACC, 'UDP': PRP, 'DNS': YLW, 'HTTP': GRN,
                                      'ICMP': '#f5ac77', 'ARP': '#91d0cb', 'IPv6': MUT}.items():
@@ -133,7 +136,7 @@ class WorkspaceUI(AnalysisPanels):
         self._packet_tree.bind('<<TreeviewSelect>>', self._packet_selected)
         self._build_alarm_tools(alert_page)
         self._alert_tree = self._table(alert_page, [
-            ('ts', 'Zaman', 110), ('review', 'İnceleme', 90), ('severity', 'Önem', 70), ('tur', 'Tespit', 155),
+            ('ts', 'Zaman', 110), ('interface', 'Arayüz', 90), ('review', 'İnceleme', 90), ('severity', 'Önem', 70), ('tur', 'Tespit', 155),
             ('ip', 'Kaynak', 140), ('dst', 'Hedef', 140), ('detay', 'Ölçüm / eşik', 330)])
         self._alert_tree.tag_configure('Yüksek', foreground=YLW)
         self._alert_tree.tag_configure('Kritik', foreground=RED)
@@ -232,8 +235,9 @@ class WorkspaceUI(AnalysisPanels):
 
     def _insert_packet(self, key, packet):
         if self._matches(packet):
-            fields = ('ui_id', 'ts', 'src', 'dst', 'proto', 'length', 'info')
-            self._packet_tree.insert('', 'end', iid=key, values=[packet.get(f, '') for f in fields[:5]] + ['Simülasyon' if packet.get('simulated') else 'Canlı'] + [packet.get(f, '') for f in fields[5:]],
+            fields = ('ui_id', 'ts', 'interface', 'src', 'dst', 'proto', 'mode', 'length', 'info')
+            view = dict(packet, mode='Simülasyon' if packet.get('simulated') else 'Canlı')
+            self._packet_tree.insert('', 'end', iid=key, values=[view.get(field, '') for field in fields],
                                       tags=(packet['proto'],))
 
     def _filtre_uygula(self):

@@ -34,9 +34,12 @@ class Motor:
     def __init__(self, q, esik, iface=None, simulation=None):
         self.q = q
         self.esik = {**ESIKLER, **esik}
-        self.iface = iface
+        self.interfaces = list(dict.fromkeys([iface] if isinstance(iface, str) else (iface or [])))
+        self.iface = self.interfaces[0] if len(self.interfaces) == 1 else None
         self.sim = not (SCAPY_OK and is_root()) if simulation is None else simulation
-        self.detector = Detector(self.esik)
+        self._detectors = {}
+        self._state_lock = threading.Lock()
+        self._interface_state = {}
         self._go = True
         self._stop = threading.Event()
         self._packet_lock = threading.Lock()
@@ -58,16 +61,41 @@ class Motor:
     def baslat(self):
         if self._threads or self._stop.is_set():
             return
-        if not self.sim and not (SCAPY_OK and is_root()):
+        if not self.sim and (not SCAPY_OK or not is_root()):
             self.status = 'Hata'
-            self._emit(('LOG', 'HATA', 'Canlı yakalama için Scapy ve root yetkisi gerekiyor.'))
+            reason = ('Scapy bu Python ortamında kurulu değil.' if not SCAPY_OK else
+                      'Scapy hazır; paket yakalama yetkisi yok. Terminalde sudo /usr/bin/python3 ids.py ile açın. Uygulama yetki yükseltmez.')
+            self._emit(('LOG', 'HATA', reason))
             return
         self.status = 'Simülasyon' if self.sim else 'Başlatılıyor'
-        target = self._sim if self.sim else self._dinle
-        args = () if self.sim else (self.iface or self._ifaces()[0],)
-        t = threading.Thread(target=target, args=args, daemon=True, name='netshield-capture')
-        self._threads.append(t)
-        t.start()
+        if self.sim:
+            targets = [(self._sim, (), 'demo')]
+        else:
+            self.interfaces = self.interfaces or [self._ifaces()[0]]
+            self._interface_state = {name: {'status': 'Başlatılıyor', 'packets': 0} for name in self.interfaces}
+            targets = [(self._dinle, (name,), name) for name in self.interfaces]
+        for target, args, name in targets:
+            thread = threading.Thread(target=target, args=args, daemon=True, name=f'netshield-{name}')
+            self._threads.append(thread)
+            thread.start()
+
+    def interface_snapshot(self):
+        with self._state_lock:
+            return {name: dict(value) for name, value in self._interface_state.items()}
+
+    def _interface_status(self, iface, status):
+        with self._state_lock:
+            entry = self._interface_state.setdefault(iface, {'packets': 0})
+            entry['status'] = status
+            statuses = {value['status'] for value in self._interface_state.values()}
+            if self._stop.is_set():
+                self.status = 'Durduruldu'
+            elif 'Canlı' in statuses:
+                self.status = 'Kısmi canlı' if 'Hata' in statuses else 'Canlı'
+            elif 'Başlatılıyor' in statuses:
+                self.status = 'Başlatılıyor'
+            else:
+                self.status = 'Hata'
 
     def dur(self):
         self._go = False
@@ -76,6 +104,9 @@ class Motor:
         for thread in self._threads:
             thread.join(timeout=max(0, deadline - time.monotonic()))
         self.status = 'Durduruldu'
+        with self._state_lock:
+            for entry in self._interface_state.values():
+                entry['status'] = 'Durduruldu'
 
     def _record_traffic(self, count):
         with self._traffic_lock:
@@ -96,28 +127,29 @@ class Motor:
         return interfaces or ['lo']
 
     def _dinle(self, iface):
-        self.iface = iface
         capture_socket = None
         try:
             capture_socket = conf.L2listen(iface=iface, type=ETH_P_ALL)
-            self.status = 'Canlı'
+            self._interface_status(iface, 'Canlı')
             self._emit(('LOG', 'SİSTEM', f'Dinleniyor: {iface}'))
             while not self._stop.is_set():
-                sniff(opened_socket=capture_socket, prn=self._pkt, store=False,
+                sniff(opened_socket=capture_socket, prn=lambda packet: self._pkt(packet, iface), store=False,
                       timeout=1.0, stop_filter=lambda _: self._stop.is_set())
         except Exception as exc:
-            self.status = 'Hata'
+            self._interface_status(iface, 'Hata')
             self._emit(('LOG', 'HATA', f'{iface}: {exc}'))
         finally:
             if capture_socket is not None:
                 capture_socket.close()
 
-    def _pkt(self, packet):
+    def _pkt(self, packet, iface=None):
         if not self._go:
             return
         with self._packet_lock:
             normalized = self._normalize(packet)
             if normalized:
+                if iface is not None:
+                    normalized['interface'] = iface
                 self._ingest(normalized, time.monotonic())
 
     def _normalize(self, packet):
@@ -166,13 +198,20 @@ class Motor:
         record['id'] = self._sequence
         record['payload'] = ''
         record['hex'] = ''
+        interface = record.get('interface', '')
+        with self._state_lock:
+            entry = self._interface_state.setdefault(interface, {'status': 'Simülasyon' if self.sim else 'Canlı', 'packets': 0})
+            entry['packets'] += 1
         with self._traffic_lock:
             self._traffic_count += 1
             if len(self._previews) == self._previews.maxlen:
                 self.preview_dropped += 1
             self._previews.append(record)
         if record['transport'] not in ('ARP', 'IPv6', 'IPv4'):
-            for event in self.detector.process(record, ts):
+            if interface not in self._detectors:
+                self._detectors[interface] = Detector(self.esik)
+            for event in self._detectors[interface].process(record, ts):
+                event['interface'] = interface
                 self._emit(('OLAY', event))
 
     def _sim(self):

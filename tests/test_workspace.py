@@ -87,6 +87,25 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(a._packet_tree.get_children(), ('1', '2'))
         self.assertIn('192.168.1.99', json.loads(Path(a.settings_path).read_text())['watchlist'])
 
+    def test_multiple_interface_selection_and_status_view(self):
+        a = self.app
+        with patch('netshield.core.motor.get_if_list', return_value=['lan1', 'lan2']):
+            a._choose_interfaces()
+            dialog = next(child for child in self.root.winfo_children() if isinstance(child, tk.Toplevel))
+            checks = [child for child in dialog.winfo_children() if isinstance(child, tk.Checkbutton)]
+            for check in checks:
+                check.select()
+            save = next(child for child in dialog.winfo_children() if isinstance(child, tk.Button))
+            save.invoke()
+        self.assertEqual(a._selected_interfaces, ['lan1', 'lan2'])
+        a.motor._interface_status('lan1', 'Canlı')
+        a.motor._interface_status('lan2', 'Hata')
+        a._refresh_interface_status()
+        self.assertEqual(a._interfaces_tree.set('lan2', 'status'), 'Hata')
+        a._interfaces_tree.selection_set('lan1')
+        a._follow_interface()
+        self.assertEqual(a._filter_text.get(), 'iface=lan1')
+
     def test_security_center_disables_exports_and_clipboard_in_enterprise_mode(self):
         from tkinter import ttk
         a = self.app

@@ -21,7 +21,8 @@ inceleme için Scapy bulunan Python ortamıyla:
 sudo python3 ids.py
 ```
 
-Üst çubuktan **modu ve arayüzü** seçin. Seçimi değiştirmek için önce
+Üst çubuktan **modu ve arayüzü** seçin. **Ağlar** düğmesiyle birden fazla
+yerel arayüz seçebilirsiniz; değişiklik için yakalama durdurulmuş olmalıdır. Seçimi değiştirmek için önce
 **Durdur**, ardından **Başlat** düğmesini kullanın. Kayıtlar durdurulduğunda
 korunur. Hatalı arayüz veya eksik yetki sistem günlüğünde gösterilir; canlı
 mod sessizce simülasyona dönüştürülmez.
@@ -189,3 +190,24 @@ anlamına gelmez. Geçmiş sürümlerde oluşturulmuş dosyalar otomatik değiş
 Kurumsal dağıtım sınırları, yönetici politikası kurulumu ve test kapsamı için
 [SECURITY.md](SECURITY.md) dosyasına bakın. Bu taban işletim sistemi güvenlik
 sınırı, sertifikasyon veya diğer uygulamalar için ağ çıkış engeli değildir.
+
+## Bir panelde birden fazla ağ
+
+**Durdur → Ağlar → arayüzleri işaretle → Seçimi uygula → Başlat**.
+Her arayüz ayrı dinlenir. Paket ve alarm tablolarında arayüz sütunu vardır.
+**Ağ arayüzleri** sekmesi her yakalamanın durumunu ve paket sayısını gösterir;
+bir arayüz başarısız olduğunda diğerleri devam eder ve durum Kısmi canlı olur.
+Arayüze çift tıklamak `iface=eth0` benzeri bir filtre uygular.
+
+Tespit pencereleri ve cooldown kayıtları arayüz başına ayrıdır. Böylece farklı
+LAN/VLAN'larda aynı özel IP kullanılması alarmları birleştirmez. Bağlantılar da
+arayüz kimliğiyle ayrılır. Cihazlar/IP toplamları, takip panelinde seçilen arayüz
+kapsamında hesaplanır; Tüm arayüzler seçiliyken aynı IP'nin toplamları birleşir.
+Aynı fiziksel paket iki arayüzden görülürse iki gözlem sayılır; tekrar ayıklama yoktur.
+
+Bu destek bilgisayarın erişebildiği Ethernet, Wi-Fi ve yapılandırılmış VLAN
+arayüzleri içindir; aynı anda bağımsız Wi-Fi ağlarına bağlanmak için uygun ayrı
+adaptörler gerekir. `lo` yalnızca bilgisayar içi trafiktir. Uzak şubelerdeki ağlar
+bu uygulamaya otomatik bağlanmaz; uzaktan sensör/ajan alımı ve yeni ağ gönderim
+özelliği eklenmemiştir. Bu sürümde canlı yakalama root kontrolünü gerektirir.
+Scapy eksikliği ve yetki eksikliği artık günlükte ayrı mesajlarla belirtilir.

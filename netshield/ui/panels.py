@@ -5,6 +5,7 @@ from netshield.core.settings import save_settings, validate_settings
 from netshield.core.tracking import summarize
 from netshield.core.security import effective_policy, PrivateSnapshot, load_managed_policy
 import json
+import shlex
 from netshield.ui.theme import BG, SURF, CARD, TXT, MUT, ACC, GRN, YLW, RED, TUR_RENK
 
 
@@ -43,7 +44,7 @@ class AnalysisPanels:
                         ('alerts', 'Alarm', 65), ('last', 'Son görülen', 115), ('watch', 'Takip', 70)]
         self._host_tree = self._table(hosts, host_columns)
         self._watch_tree = self._table(watched, host_columns)
-        self._flow_tree = self._table(flows, [('proto', 'Protokol', 80), ('a', 'Uç A', 210),
+        self._flow_tree = self._table(flows, [('interface', 'Arayüz', 90), ('proto', 'Protokol', 80), ('a', 'Uç A', 210),
                                              ('b', 'Uç B', 210), ('packets', 'Paket', 70),
                                              ('bytes', 'Bayt', 100), ('last', 'Son görülen', 115)])
         self._flow_rows = {}
@@ -61,6 +62,17 @@ class AnalysisPanels:
                              values=['Tüm modlar', 'Canlı', 'Simülasyon'], width=14)
         scope.pack(side='right')
         scope.bind('<<ComboboxSelected>>', lambda _: self._change_tracking_scope())
+        self._tracking_iface = tk.StringVar(value='Tüm arayüzler')
+        self._tracking_iface_box = ttk.Combobox(footer, textvariable=self._tracking_iface, state='readonly',
+                                               values=['Tüm arayüzler'], width=15)
+        self._tracking_iface_box.pack(side='right', padx=8)
+        self._tracking_iface_box.bind('<<ComboboxSelected>>', lambda _: self._change_tracking_scope())
+        networks = tk.Frame(self._notebook, bg=SURF)
+        self._notebook.add(networks, text='Ağ arayüzleri')
+        tk.Label(networks, text='Seçilen yerel arayüzlerin durumu · bu yakalama oturumundaki toplam paketler',
+                 bg=SURF, fg=MUT, padx=12, pady=12).pack(anchor='w')
+        self._interfaces_tree = self._table(networks, [('interface', 'Arayüz', 160), ('status', 'Durum', 180), ('packets', 'Paket', 160)])
+        self._interfaces_tree.bind('<Double-1>', lambda _: self._follow_interface())
         self._tracking_dirty = True
         self._notebook.bind('<<NotebookTabChanged>>', lambda _: self._refresh_tracking())
 
@@ -159,7 +171,8 @@ class AnalysisPanels:
             return
         scope = self._tracking_scope.get()
         def in_scope(record):
-            return scope == 'Tüm modlar' or bool(record.get('simulated')) == (scope == 'Simülasyon')
+            return (scope == 'Tüm modlar' or bool(record.get('simulated')) == (scope == 'Simülasyon')) and (
+                self._tracking_iface.get() == 'Tüm arayüzler' or record.get('interface') == self._tracking_iface.get())
         packets = [p for p in self._packets.values() if in_scope(p)]
         alerts = [e for e in self.olaylar if in_scope(e)]
         summary = summarize(packets, alerts, self.preferences['watchlist'])
@@ -182,11 +195,11 @@ class AnalysisPanels:
                 for h in summary['hosts']]
         replace(self._host_tree, rows)
         replace(self._watch_tree, [(key, values) for key, values in rows if key in watched])
-        self._flow_rows = {str((f['protocol'], f['a'], f['b'])): f for f in summary['conversations']}
-        replace(self._flow_tree, [(key, [f['protocol'], self._endpoint(f['a']), self._endpoint(f['b']),
+        self._flow_rows = {str((f['interface'], f['protocol'], f['a'], f['b'])): f for f in summary['conversations']}
+        replace(self._flow_tree, [(key, [f['interface'], f['protocol'], self._endpoint(f['a']), self._endpoint(f['b']),
                                        f['packets'], f['bytes'], f['last']]) for key, f in self._flow_rows.items()])
         protocols = '  ·  '.join(f'{name}: {count}' for name, count in summary['protocols'].most_common(6))
-        self._tracking_caption.configure(text=f"{scope} · Önizleme kapsamı: {len(packets)} paket · {len(summary['hosts'])} IP · {len(self._flow_rows)} bağlantı\n{protocols or 'Henüz trafik yok. Takip listesine IP ekleyebilirsiniz.'}")
+        self._tracking_caption.configure(text=f"{scope} · {self._tracking_iface.get()} · Önizleme kapsamı: {len(packets)} paket · {len(summary['hosts'])} IP · {len(self._flow_rows)} bağlantı\n{protocols or 'Henüz trafik yok.'} · IP toplamları seçili arayüz kapsamındadır")
         self._tracking_dirty = False
 
     def _change_tracking_scope(self):
@@ -208,7 +221,7 @@ class AnalysisPanels:
     def _follow_host(self, tree):
         if tree.selection():
             suffix = {'Canlı': ' mode=live', 'Simülasyon': ' mode=demo'}.get(self._tracking_scope.get(), '')
-            self._apply_expression(f'ip={tree.selection()[0]}' + suffix)
+            self._apply_expression(f'ip={tree.selection()[0]}' + suffix + self._interface_filter_suffix())
 
     def _host_details(self, tree):
         if tree.selection():
@@ -219,14 +232,14 @@ class AnalysisPanels:
         if self._flow_tree.selection():
             flow = self._flow_rows.get(self._flow_tree.selection()[0])
             if flow:
-                self._show_details(f"{flow['protocol']} · {self._endpoint(flow['a'])} ↔ {self._endpoint(flow['b'])}\nPaket: {flow['packets']}  Bayt: {flow['bytes']}\n\nİki yön birleştirilir; bu görünüm TCP akışını yeniden oluşturmaz.\nÇift tıklayarak bağlantının paketlerini filtreleyin.")
+                self._show_details(f"Arayüz: {flow['interface'] or '—'} · {flow['protocol']} · {self._endpoint(flow['a'])} ↔ {self._endpoint(flow['b'])}\nPaket: {flow['packets']}  Bayt: {flow['bytes']}\n\nİki yön birleştirilir; bu görünüm TCP akışını yeniden oluşturmaz.\nÇift tıklayarak bağlantının paketlerini filtreleyin.")
 
     def _follow_flow(self):
         if self._flow_tree.selection():
             flow = self._flow_rows.get(self._flow_tree.selection()[0])
             if flow:
                 suffix = {'Canlı': ' mode=live', 'Simülasyon': ' mode=demo'}.get(self._tracking_scope.get(), '')
-                self._apply_expression(self._flow_expression(flow['protocol'], flow['a'], flow['b']) + suffix)
+                self._apply_expression(self._flow_expression(flow['protocol'], flow['a'], flow['b']) + suffix + (' iface=' + shlex.quote(flow['interface']) if flow['interface'] else ''))
 
     @staticmethod
     def _flow_expression(protocol, a, b):
@@ -290,7 +303,7 @@ class AnalysisPanels:
 
     def _insert_alert(self, event):
         if self._alert_matches(event):
-            values = [event.get('ts'), 'İncelendi' if event.get('reviewed') else 'Yeni']
+            values = [event.get('ts'), event.get('interface', ''), 'İncelendi' if event.get('reviewed') else 'Yeni']
             values += [event.get(k, '') for k in ('severity', 'tur', 'ip', 'dst', 'detay')]
             self._alert_tree.insert('', 'end', iid=str(event['id']), values=values, tags=(event.get('severity', 'Yüksek'),))
 
@@ -328,15 +341,68 @@ class AnalysisPanels:
     def _refresh_interfaces(self):
         from netshield.core.motor import get_if_list
         if self.motor and self.motor.status not in ('Durduruldu', 'Hata', 'Hazır'):
-            messagebox.showinfo('Arayüzler', 'Arayüz listesini yenilemek için yakalamayı durdurun.', parent=self.root)
-            return
+            messagebox.showinfo('Arayüzler', 'Arayüz seçimini değiştirmek için yakalamayı durdurun.', parent=self.root)
+            return False
         try:
             values = get_if_list()
             self._iface_box.configure(values=values)
-            if self._iface.get() not in values:
-                self._iface.set(values[0] if values else '')
+            self._selected_interfaces = [name for name in self._selected_interfaces if name in values]
+            if not self._selected_interfaces and values:
+                self._selected_interfaces = [values[0]]
+            self._iface.set(', '.join(self._selected_interfaces))
+            return True
         except Exception as exc:
             messagebox.showerror('Arayüzler okunamadı', str(exc), parent=self.root)
+            return False
+
+    def _choose_interfaces(self):
+        from netshield.core.motor import get_if_list
+        if not self._refresh_interfaces():
+            return
+        win = tk.Toplevel(self.root)
+        win.title('İzlenecek yerel ağ arayüzleri')
+        win.configure(bg=SURF)
+        win.transient(self.root)
+        tk.Label(win, text='Birden fazla arayüz seçebilirsiniz.\nlo bilgisayar içi bağlantıdır; uzak ağ sensörü değildir.',
+                 bg=SURF, fg=TXT, justify='left').pack(padx=18, pady=14)
+        variables = {}
+        for name in get_if_list():
+            variable = tk.BooleanVar(value=name in self._selected_interfaces)
+            variables[name] = variable
+            tk.Checkbutton(win, text=name, variable=variable, bg=SURF, fg=TXT, selectcolor=CARD).pack(anchor='w', padx=18)
+        def save():
+            selected = [name for name, variable in variables.items() if variable.get()]
+            if not selected:
+                messagebox.showerror('Arayüzler', 'En az bir arayüz seçin.', parent=win)
+                return
+            self._selected_interfaces = selected
+            self._iface.set(', '.join(selected))
+            win.destroy()
+        self._button(win, 'Seçimi uygula', save, True).pack(fill='x', padx=18, pady=14)
+
+    def _refresh_interface_status(self):
+        snapshot = self.motor.interface_snapshot()
+        tree = self._interfaces_tree
+        for old in set(tree.get_children()) - set(snapshot):
+            tree.delete(old)
+        for name, value in snapshot.items():
+            key = name or '(belirtilmedi)'
+            values = (name, value['status'], value['packets'])
+            if tree.exists(key):
+                tree.item(key, values=values)
+            else:
+                tree.insert('', 'end', iid=key, values=values)
+        available = sorted(set(self._selected_interfaces) | {p.get('interface', '') for p in self._packets.values()} - {''})
+        self._tracking_iface_box.configure(values=['Tüm arayüzler', *available])
+
+    def _follow_interface(self):
+        selection = self._interfaces_tree.selection()
+        if selection:
+            self._apply_expression('iface=' + shlex.quote(selection[0]))
+
+    def _interface_filter_suffix(self):
+        interface = self._tracking_iface.get()
+        return '' if interface == 'Tüm arayüzler' else ' iface=' + shlex.quote(interface)
 
     def _help(self):
         messagebox.showinfo('Çalışma alanı kısayolları',
