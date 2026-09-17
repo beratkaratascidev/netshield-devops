@@ -1,76 +1,73 @@
-import time
-import re
+"""Capture, bounded packet previews and a shared live/demo detection pipeline."""
 import queue
+import random
+import re
 import threading
+import time
+from collections import deque
+from datetime import datetime
 
-from collections import deque, defaultdict
 try:
-    from scapy.all import sniff, IP, TCP, UDP, ICMP, get_if_list, conf, ETH_P_ALL
+    from scapy.all import (sniff, IP, IPv6, ARP, TCP, UDP, ICMP, DNS,
+                           get_if_list, conf, ETH_P_ALL)
     SCAPY_OK = True
 except ImportError:
     SCAPY_OK = False
-    sniff = None
-    conf = None
+    sniff = conf = IP = IPv6 = ARP = TCP = UDP = ICMP = DNS = None
     ETH_P_ALL = 3
-    IP = TCP = UDP = ICMP = None
 
     def get_if_list():
         return []
 
-from netshield.core.sliding_window import SW
-from netshield.config import COOLDOWN, HTTP_PORTS
+from netshield.config import ESIKLER, HTTP_PORTS, PACKET_HISTORY
+from netshield.core.detection import Detector
 from netshield.net.utils import is_root
-from datetime import datetime
+
+HTTP_LINE = re.compile(rb'^(GET|HEAD|POST|PUT|DELETE|CONNECT|OPTIONS|TRACE|PATCH) [^ \r\n]+ HTTP/1\.[01]\r\n')
+
 
 def ts_str():
-    return datetime.now().strftime("%H:%M:%S")
+    return datetime.now().strftime('%H:%M:%S.%f')[:-3]
+
 
 class Motor:
-    """
-    Her ağ arayüzü için ayrı sniff thread'i başlatır.
-    Tüm paketler ortak _pkt() fonksiyonundan geçer.
-    Olaylar queue, trafik sayısı kilit korumalı sayaç üzerinden aktarılır.
-    """
-
-    def __init__(self, q: queue.Queue, esik: dict):
-        self.q    = q
-        self.esik = esik
-        self._go  = True
+    def __init__(self, q, esik, iface=None, simulation=None):
+        self.q = q
+        self.esik = {**ESIKLER, **esik}
+        self.iface = iface
+        self.sim = not (SCAPY_OK and is_root()) if simulation is None else simulation
+        self.detector = Detector(self.esik)
+        self._go = True
+        self._stop = threading.Event()
         self._packet_lock = threading.Lock()
         self._traffic_lock = threading.Lock()
         self._traffic_count = 0
-        self._stop = threading.Event()
-        self.sim  = not (SCAPY_OK and is_root())
+        self._previews = deque(maxlen=PACKET_HISTORY)
+        self.preview_dropped = 0
+        self.event_dropped = 0
+        self._sequence = 0
+        self._threads = []
+        self.status = 'Hazır'
 
-        self.sw_icmp = SW(1.0)
-        self.sw_syn  = SW(1.0)
-        self.sw_udp  = SW(1.0)
-        self.sw_http = SW(1.0)
-
-        # Port tarama
-        self._pt_ts  = defaultdict(deque)   # ip → deque[(ts,port)]
-        self._pt_set = defaultdict(set)     # ip → set(ports)
-
-        # Cooldown: (ip, tur) → last_ts
-        self._cd: dict = {}
-        self._last_purge = time.monotonic()
-
-        self._threads: list[threading.Thread] = []
+    def _emit(self, message):
+        try:
+            self.q.put_nowait(message)
+        except queue.Full:
+            self.event_dropped += 1
 
     def baslat(self):
         if self._threads or self._stop.is_set():
             return
-        if self.sim:
-            self.q.put(("LOG","SİSTEM","Motor başladı ▸ SİMÜLASYON MODU"))
-            t = threading.Thread(target=self._sim, daemon=True, name="sim")
-            t.start(); self._threads.append(t)
-        else:
-            ifaces = self._ifaces()
-            self.q.put(("LOG","SİSTEM",f"Motor başladı ▸ CANLI — arayüzler: {ifaces}"))
-            for iface in ifaces:
-                t = threading.Thread(target=self._dinle, args=(iface,),
-                                     daemon=True, name=f"sniff-{iface}")
-                t.start(); self._threads.append(t)
+        if not self.sim and not (SCAPY_OK and is_root()):
+            self.status = 'Hata'
+            self._emit(('LOG', 'HATA', 'Canlı yakalama için Scapy ve root yetkisi gerekiyor.'))
+            return
+        self.status = 'Simülasyon' if self.sim else 'Başlatılıyor'
+        target = self._sim if self.sim else self._dinle
+        args = () if self.sim else (self.iface or self._ifaces()[0],)
+        t = threading.Thread(target=target, args=args, daemon=True, name='netshield-capture')
+        self._threads.append(t)
+        t.start()
 
     def dur(self):
         self._go = False
@@ -78,242 +75,137 @@ class Motor:
         deadline = time.monotonic() + 1.5
         for thread in self._threads:
             thread.join(timeout=max(0, deadline - time.monotonic()))
+        self.status = 'Durduruldu'
 
     def _record_traffic(self, count):
         with self._traffic_lock:
             self._traffic_count += count
 
     def consume_traffic(self):
-        """Return and reset packets since the last UI sample atomically."""
         with self._traffic_lock:
             count = self._traffic_count
             self._traffic_count = 0
             return count
 
-    def _ifaces(self):
-        try:
-            lst = get_if_list()
-            return lst if lst else ["lo","eth0"]
-        except:
-            return ["lo","eth0"]
+    def consume_packets(self, limit=500):
+        with self._traffic_lock:
+            return [self._previews.popleft() for _ in range(min(limit, len(self._previews)))]
 
-    # ── Her arayüz için ayrı thread ────────
+    def _ifaces(self):
+        interfaces = get_if_list()
+        return interfaces or ['lo']
+
     def _dinle(self, iface):
-        self.q.put(("LOG","SİSTEM",f"Dinleniyor: {iface}"))
+        self.iface = iface
         capture_socket = None
         try:
-            # Keep the socket open between timed polls so packets remain buffered.
             capture_socket = conf.L2listen(iface=iface, type=ETH_P_ALL)
+            self.status = 'Canlı'
+            self._emit(('LOG', 'SİSTEM', f'Dinleniyor: {iface}'))
             while not self._stop.is_set():
-                sniff(
-                    opened_socket=capture_socket,
-                    prn=self._pkt,
-                    store=False,
-                    timeout=1.0,
-                    stop_filter=lambda _: self._stop.is_set(),
-                )
-        except Exception as e:
-            self.q.put(("LOG","HATA",f"{iface} dinleme hatası: {e}"))
+                sniff(opened_socket=capture_socket, prn=self._pkt, store=False,
+                      timeout=1.0, stop_filter=lambda _: self._stop.is_set())
+        except Exception as exc:
+            self.status = 'Hata'
+            self._emit(('LOG', 'HATA', f'{iface}: {exc}'))
         finally:
             if capture_socket is not None:
                 capture_socket.close()
 
-    # ── Paket işleme (tüm arayüzlerden) ───
-    def _pkt(self, pkt):
+    def _pkt(self, packet):
+        if not self._go:
+            return
         with self._packet_lock:
-            self._process_packet(pkt)
+            normalized = self._normalize(packet)
+            if normalized:
+                self._ingest(normalized, time.monotonic())
 
-    def _process_packet(self, pkt):
-        if not self._go or IP not in pkt:
-            return
+    def _normalize(self, packet):
+        if IP in packet:
+            layer = packet[IP]
+            version = 'IPv4'
+        elif IPv6 in packet:
+            layer = packet[IPv6]
+            version = 'IPv6'
+        elif ARP in packet:
+            layer = packet[ARP]
+            return dict(ts=ts_str(), src=layer.psrc, dst=layer.pdst, sport=None, dport=None,
+                        proto='ARP', transport='ARP', length=len(packet), flags='',
+                        info=f'ARP op={layer.op} · {layer.hwsrc}', interface=self.iface or '',
+                        hex=bytes(packet)[:256].hex(' '), payload='', simulated=False)
+        else:
+            return None
+        record = dict(ts=ts_str(), src=layer.src, dst=getattr(layer, 'dst', ''),
+                      sport=None, dport=None, proto=version, transport=version, network=version,
+                      length=len(packet), flags='', flags_value=0, payload_size=0,
+                      info=version, interface=self.iface or '', simulated=False,
+                      hex=bytes(packet)[:256].hex(' '), payload='')
+        if TCP in packet or UDP in packet:
+            transport = 'TCP' if TCP in packet else 'UDP'
+            layer = packet[TCP] if transport == 'TCP' else packet[UDP]
+            payload = bytes(layer.payload)
+            record.update(transport=transport, proto=transport, sport=layer.sport,
+                          dport=layer.dport, payload_size=len(payload),
+                          payload=payload[:256].decode('utf-8', errors='replace'))
+            if transport == 'TCP':
+                record.update(flags=str(layer.flags), flags_value=int(layer.flags))
+                if layer.dport in HTTP_PORTS and HTTP_LINE.match(payload):
+                    record.update(proto='HTTP', http_request=True)
+            if DNS in packet:
+                record.update(proto='DNS', dns_query=int(packet[DNS].qr) == 0)
+            record['info'] = f"{layer.sport} → {layer.dport}  {record['flags']}  yük={len(payload)} B"
+            if record.get('http_request'):
+                record['info'] = payload.split(b'\r\n', 1)[0][:160].decode('utf-8', errors='replace')
+        elif ICMP in packet:
+            record.update(proto='ICMP', transport='ICMP', icmp_type=packet[ICMP].type,
+                          info=f'ICMP type={packet[ICMP].type} code={packet[ICMP].code}')
+        return record
 
-        src = pkt[IP].src
-        ts = time.monotonic()
+    def _ingest(self, record, ts):
+        self._sequence += 1
+        record['id'] = self._sequence
+        with self._traffic_lock:
+            self._traffic_count += 1
+            if len(self._previews) == self._previews.maxlen:
+                self.preview_dropped += 1
+            self._previews.append(record)
+        if record['transport'] not in ('ARP', 'IPv6', 'IPv4'):
+            for event in self.detector.process(record, ts):
+                self._emit(('OLAY', event))
 
-        # Canlı trafik grafiğine paket bilgisini gönder
-        self._record_traffic(1)
-
-        # ICMP / Ping
-        if ICMP in pkt:
-            n = self.sw_icmp.add(src, ts)
-            self._bildir(
-                src,
-                "ICMP",
-                f"type={pkt[ICMP].type} count={n}",
-                ts,
-                flood=(n >= self.esik["icmp_per_sec"])
-            )
-
-        # TCP
-        if TCP in pkt:
-            fl = int(pkt[TCP].flags)
-            dport = pkt[TCP].dport
-
-            # SYN paketi: SYN=1, ACK=0
-            if (fl & 0x02) and not (fl & 0x10):
-                n = self.sw_syn.add(src, ts)
-                self._bildir(
-                    src,
-                    "SYN",
-                    f"→:{dport} count={n}",
-                    ts,
-                    flood=(n >= self.esik["syn_per_sec"])
-                )
-
-            # Count visible HTTP/1 request lines, not ACKs or TLS packets.
-            # Stream reassembly and encrypted HTTP are not supported.
-            payload = bytes(pkt[TCP].payload)
-            if dport in HTTP_PORTS and re.match(
-                rb"^(GET|HEAD|POST|PUT|DELETE|CONNECT|OPTIONS|TRACE|PATCH) [^ \r\n]+ HTTP/1\.[01]\r\n",
-                payload,
-            ):
-                n = self.sw_http.add(src, ts)
-                if n >= self.esik["http_per_sec"]:
-                    self._bildir(
-                        src,
-                        "HTTP Flood",
-                        f"{n} istek/sn →:{dport}",
-                        ts,
-                        flood=True
-                    )
-
-            # TCP port tarama kontrolü
-            self._pt(src, dport, ts)
-
-        # UDP
-        if UDP in pkt:
-            n = self.sw_udp.add(src, ts)
-            self._bildir(
-                src,
-                "UDP",
-                f"→:{pkt[UDP].dport} count={n}",
-                ts,
-                flood=(n >= self.esik["udp_per_sec"])
-            )
-
-            self._pt(src, pkt[UDP].dport, ts)
-
-        # Eski sayaç kayıtlarını temizle
-        if ts - self._last_purge > 60:
-            for sw in (
-                self.sw_icmp,
-                self.sw_syn,
-                self.sw_udp,
-                self.sw_http
-            ):
-                sw.purge()
-
-            dead = [
-                key for key, value in self._cd.items()
-                if ts - value > 300
-            ]
-
-            for key in dead:
-                del self._cd[key]
-
-            self._last_purge = ts
-
-    # ── Port tarama ────────────────────────
-    def _pt(self, ip, port, ts):
-        win = self.esik["port_win"]
-        d, s = self._pt_ts[ip], self._pt_set[ip]
-        d.append((ts, port)); s.add(port)
-        cutoff = ts - win
-        while d and d[0][0] < cutoff:
-            _, op = d.popleft()
-            if not any(p == op for _, p in d):
-                s.discard(op)
-        if len(s) >= self.esik["port_scan"]:
-            self._bildir(ip, "Port Tarama",
-                         f"{len(s)} port/{win}sn", ts, flood=True)
-            d.clear(); s.clear()
-
-    # ── Bildirim (cooldown korumalı) ───────
-    def _bildir(self, ip, tur, detay, ts, flood=False):
-        tip = "FLOOD" if flood else "PAKET"
-
-        # Normal paket ve flood bildirimleri birbirini engellemesin
-        key = (ip, tur, tip)
-
-        last = self._cd.get(key, 0.0)
-        if ts - last < COOLDOWN:
-            return
-
-        self._cd[key] = ts
-
-        olay = {
-            "ts": ts_str(),
-            "ip": ip,
-            "tur": tur,
-            "detay": detay,
-            "tip": tip,
-        }
-
-        self.q.put(("OLAY", olay))
-    # ── Simülasyon ─────────────────────────
     def _sim(self):
-        import random
-        rng  = random.Random()
-        pool = [f"{rng.randint(1,223)}.{rng.randint(0,254)}."
-                f"{rng.randint(0,254)}.{rng.randint(1,254)}" for _ in range(8)]
-        # Yerel IP de ekle (gerçekçilik)
-        pool += ["192.168.1.100","10.0.0.5","127.0.0.1"]
-
-        SENARYOLAR = ["ping","ping_flood","syn","syn_flood",
-                      "udp","udp_flood","port_scan","http_flood","normal"]
-        AGIRLIK    = [10,   8,           8,   7,
-                      7,   6,            8,   6,          20]
-
-        while not self._stop.wait(0.08):
-            ts = time.monotonic()
-            ip = rng.choice(pool)
-            sc = rng.choices(SENARYOLAR, weights=AGIRLIK, k=1)[0]
-
-            if sc == "ping":
-                n = self.sw_icmp.add(ip, ts)
-                self._bildir(ip,"ICMP",f"echo-req count={n}",ts,flood=False)
-                self._record_traffic(1)
-
-            elif sc == "ping_flood":
-                burst = self.esik["icmp_per_sec"] + rng.randint(3,20)
-                for _ in range(burst): n = self.sw_icmp.add(ip, ts)
-                self._bildir(ip,"ICMP",f"FLOOD {n}/sn",ts,flood=True)
-                self._record_traffic(burst)
-
-            elif sc == "syn":
-                n = self.sw_syn.add(ip, ts)
-                self._bildir(ip,"SYN",f"→:{rng.randint(1,65535)} count={n}",ts,flood=False)
-                self._record_traffic(1)
-
-            elif sc == "syn_flood":
-                burst = self.esik["syn_per_sec"] + rng.randint(5,30)
-                for _ in range(burst): n = self.sw_syn.add(ip, ts)
-                self._bildir(ip,"SYN",f"FLOOD {n}/sn",ts,flood=True)
-                self._record_traffic(burst)
-
-            elif sc == "udp":
-                n = self.sw_udp.add(ip, ts)
-                self._bildir(ip,"UDP",f"→:{rng.randint(1,65535)} count={n}",ts,flood=False)
-                self._record_traffic(1)
-
-            elif sc == "udp_flood":
-                burst = self.esik["udp_per_sec"] + rng.randint(5,30)
-                for _ in range(burst): n = self.sw_udp.add(ip, ts)
-                self._bildir(ip,"UDP",f"FLOOD {n}/sn",ts,flood=True)
-                self._record_traffic(burst)
-
-            elif sc == "port_scan":
-                ports = rng.sample(range(1,65535), rng.randint(5,15))
-                for p in ports: self._pt(ip, p, ts)
-                self._record_traffic(len(ports))
-
-            elif sc == "http_flood":
-                burst = self.esik["http_per_sec"] + rng.randint(5,20)
-                for _ in range(burst): n = self.sw_http.add(ip, ts)
-                self._bildir(ip,"HTTP Flood",f"{n}/sn",ts,flood=True)
-                self._record_traffic(burst)
-
-            else:
-                self._record_traffic(rng.randint(1,10))
-
-
+        self._emit(('LOG', 'SİSTEM', 'Simülasyon: sentetik paketler, ağa gönderim yok.'))
+        rng = random.Random(42)
+        scenarios = [('ICMP', 'icmp_per_sec'), ('SYN', 'syn_per_sec'),
+                     ('UDP', 'udp_per_sec'), ('HTTP', 'http_per_sec'),
+                     ('ACK', 'ack_per_sec'), ('RST', 'rst_per_sec'),
+                     ('DNS', 'dns_per_sec'), ('SCAN', 'port_scan'),
+                     ('DISTRIBUTED', 'target_per_sec'), ('NORMAL', None)]
+        index = 0
+        while not self._stop.wait(0.65):
+            kind, setting = scenarios[index % len(scenarios)]
+            index += 1
+            count = self.esik[setting] + 3 if setting else 8
+            if kind == 'DISTRIBUTED':
+                count = max(count, self.esik['target_sources'] + 1)
+            count = min(count, 5000)
+            src = f'192.168.1.{rng.randint(20, 80)}'
+            for number in range(count):
+                if self._stop.is_set():
+                    return
+                transport = 'ICMP' if kind == 'ICMP' else 'UDP' if kind in ('UDP', 'DNS') else 'TCP'
+                flags = {'SYN': 2, 'ACK': 16, 'RST': 4, 'SCAN': 2}.get(kind, 24)
+                source = src
+                if kind == 'DISTRIBUTED':
+                    host = number % self.esik['target_sources']
+                    source = f'10.20.{host // 250}.{host % 250 + 1}'
+                record = dict(ts=ts_str(), src=source, dst='192.168.1.200' if kind == 'DISTRIBUTED' else '192.168.1.10', sport=49152,
+                              dport=number + 1 if kind == 'SCAN' else 53 if kind == 'DNS' else 80,
+                              transport=transport, proto=kind if kind in ('DNS', 'HTTP') else transport,
+                              flags_value=flags, flags={2: 'S', 16: 'A', 4: 'R', 24: 'PA'}[flags],
+                              length=60, payload_size=0 if kind == 'ACK' else 20,
+                              icmp_type=8, http_request=kind == 'HTTP', dns_query=kind == 'DNS',
+                              info=f'Simülasyon · {kind}', interface='demo', simulated=True,
+                              payload='Sentetik örnek; ham paket yok.', hex='')
+                with self._packet_lock:
+                    self._ingest(record, time.monotonic())

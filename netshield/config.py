@@ -12,13 +12,21 @@ HTTP_PORTS = {
 }
 
 ESIKLER = {
-    "icmp_per_sec": 5,
-    "syn_per_sec": 10,
-    "udp_per_sec": 10,
-    "http_per_sec": 20,
-    "port_scan": 4,
+    "icmp_per_sec": 100,
+    "syn_per_sec": 150,
+    "udp_per_sec": 300,
+    "http_per_sec": 100,
+    "ack_per_sec": 500,
+    "rst_per_sec": 100,
+    "dns_per_sec": 150,
+    "port_scan": 20,
     "port_win": 5,
+    "target_per_sec": 1000,
+    "target_sources": 10,
 }
+
+PACKET_HISTORY = 2000
+ALERT_HISTORY = 2000
 
 # Aynı IP, protokol ve olay türü için bildirim aralığı
 COOLDOWN = 1.0

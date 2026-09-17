@@ -15,6 +15,9 @@ class AppTests(unittest.TestCase):
     def setUp(self):
         self.app = ids.App.__new__(ids.App)
         self.app.banned = {}
+        self.app._closed = False
+        self.app._autoscroll = Mock()
+        self.app._autoscroll.get.return_value = False
         self.app.motor = motor.Motor(queue.Queue(), dict(ESIKLER))
         self.app._packet_total = 0
         self.app._grafik_ciz = Mock()
@@ -130,11 +133,11 @@ class MotorTests(unittest.TestCase):
     def events_for(self, payload):
         q = queue.Queue()
         m = motor.Motor(q, dict(ESIKLER))
-        packet = {'IP': SimpleNamespace(src='192.0.2.1'),
-                  'TCP': SimpleNamespace(flags=16, dport=80, payload=payload)}
-        with patch.multiple(motor, IP='IP', TCP='TCP', UDP='UDP', ICMP='ICMP'), \
-                patch.object(motor.time, 'monotonic', return_value=1000.0):
-            for _ in range(20):
+        if not motor.SCAPY_OK:
+            self.skipTest('Scapy is optional')
+        packet = motor.IP(src='192.0.2.1', dst='192.0.2.2') / motor.TCP(flags='A', dport=80) / payload
+        with patch.object(motor.time, 'monotonic', return_value=1000.0):
+            for _ in range(ESIKLER['http_per_sec']):
                 m._pkt(packet)
         return [msg[1] for msg in list(q.queue) if msg[0] == 'OLAY']
 
