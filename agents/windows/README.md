@@ -36,15 +36,16 @@ alanında içeren sertifika ve özel anahtar hazırlayın. Windows istemcisi bu 
 güvenmelidir. Sertifika doğrulamasını devre dışı bırakmayın. Aşağıdaki adresler
 örnektir; kuruluşunuzdaki gerçek adres/dosya yollarıyla değiştirin.
 
-Proje dizininde:
+Proje dizininde önce `docs/RECEIVER_OPERATIONS.md` içindeki sanal ortam ve
+`requirements-receiver.txt` kurulumunu tamamlayın. Ardından:
 
 ```bash
-python3 -m netshield.agent_receiver --settings /path/to/settings.json enroll \
+.venv/bin/python -m netshield.agent_receiver --settings /path/to/settings.json enroll \
   --device-id PANELDEKI_KIMLIK \
   --server https://netshield.company.example:8443 \
   --output /private/location/agent-config.json
 
-python3 -m netshield.agent_receiver --settings /path/to/settings.json serve \
+.venv/bin/python -m netshield.agent_receiver --settings /path/to/settings.json serve \
   --bind 192.168.1.10 --port 8443 \
   --cert /private/location/server.crt --key /private/location/server.key
 ```
@@ -55,8 +56,8 @@ ayar dizini kullanabileceğini dikkate alın. Alıcı root gerektirmez. Varsayı
 bind `127.0.0.1` olduğundan başka bilgisayarlar için açıkça LAN adresi seçilmelidir.
 Hiçbir firewall, port yönlendirme, DNS veya servis ayarı otomatik değiştirilmez.
 
-Bu alıcı düşük hacimli pilot içindir: istekler sırayla işlenir, TLS/okuma zaman
-sınırı 5 saniyedir; yüksek yük / DoS dayanıklılığı iddia edilmez. Yalnızca şirketin
+Alıcı artık asenkron HTTPS ve işlemsel SQLite kullanır. Kurulum bağımlılığı,
+kabul sınırları ve ölçülmüş yük sonuçları için [alıcı rehberine](../../docs/RECEIVER_OPERATIONS.md) bakın. Yalnızca şirketin
 özel LAN/VPN erişimine açın. Aynı ayar dizininde tek alıcı çalıştırın ve eşleştirme
 komutlarını sırayla yürütün. İnternete doğrudan yayın için üretim sunucusu,
 merkezi yönetim ve yük testleri ayrıca gerekir.
@@ -86,7 +87,7 @@ olaylar kaybolabilir. Uyku/kapanış öncesi son mesajın ulaşması garanti edi
 ## 4. Erişimi iptal edin
 
 ```bash
-python3 -m netshield.agent_receiver --settings /path/to/settings.json revoke --device-id PANELDEKI_KIMLIK
+.venv/bin/python -m netshield.agent_receiver --settings /path/to/settings.json revoke --device-id PANELDEKI_KIMLIK
 ```
 
 İptal sonraki istekte uygulanır. Panelde envanter kaydının silinmesi de sonraki
@@ -96,14 +97,15 @@ kılar; yeni bir output yolu verin ve Windows yapılandırmasını güncelleyin.
 ## Veri saklama ve pilot kabul kontrolü
 
 Alıcı ayar dizininde `agent-credentials.json` (anahtarların SHA-256 özetleri) ve
-`agent-status.json` (cihaz başına son 100 olay ve son durum) tutar. POSIX izinleri
-0600, yazım atomiktir. Veriler disk üzerinde şifrelenmez; kurumun disk/hesap
-koruması gerekir. Sayı sınırı vardır, süreye bağlı otomatik silme yoktur. Envanterden
-silinen kayıtların eski durumları bir sonraki kabul edilen mesajda temizlenir;
-alıcı kapalıysa dosyada kalır. Tam temizlik için alıcıyı durdurup yerel durum
-ve yedeklerini kurum politikanıza göre yönetin. Olaylar trafik JSON/HTML raporlarına
-eklenmez. Erişim anahtarı kopyalanırsa o cihaz taklit edilebilir; donanımsal kimlik
-veya kurcalama koruması yoktur.
+`agent-status.sqlite3` (cihaz başına en fazla 1.000 olay; panelde son 100) tutar.
+Varsayılan saklama süresi sunucu alım saatine göre 30 gündür. Alıcı açıkken 60 saniyede
+bir bakım yapılır. POSIX izinleri 0600; DB yazımları işlemseldir. Eski JSON tek sefer
+aktarılır ve orijinali otomatik silinmez. Ayrıntılar ve sınırlamalar
+[alıcı rehberinde](../../docs/RECEIVER_OPERATIONS.md).
+
+Windows ajanının mevcut gönderim kuyruğu hâlâ RAM'dedir; kalıcı ajan kuyruğu henüz
+uygulanmadı. Anahtar kopyalanırsa cihaz taklit edilebilir; donanımsal kimlik veya
+kurcalama koruması yoktur. Olaylar trafik JSON/HTML raporlarına eklenmez.
 
 Pilot Windows bilgisayarında sırayla doğrulayın:
 

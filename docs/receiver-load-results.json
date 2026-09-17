@@ -1,0 +1,77 @@
+{
+  "scope": "Single-host loopback HTTPS, synthetic data; not Windows or sustained production load",
+  "results": [
+    {
+      "devices": 10,
+      "events_per_request": 1,
+      "concurrency": 64,
+      "accepted": 10,
+      "stored_events": 10,
+      "elapsed_seconds": 0.055,
+      "p95_seconds": 0.053,
+      "cpu_seconds": 0.031,
+      "process_peak_rss_kib": 77760,
+      "database_bytes": 73728
+    },
+    {
+      "devices": 10,
+      "events_per_request": 100,
+      "concurrency": 64,
+      "accepted": 10,
+      "stored_events": 1000,
+      "elapsed_seconds": 0.073,
+      "p95_seconds": 0.07,
+      "cpu_seconds": 0.042,
+      "process_peak_rss_kib": 77760,
+      "database_bytes": 253952
+    },
+    {
+      "devices": 100,
+      "events_per_request": 1,
+      "concurrency": 64,
+      "accepted": 100,
+      "stored_events": 100,
+      "elapsed_seconds": 0.499,
+      "p95_seconds": 0.469,
+      "cpu_seconds": 0.259,
+      "process_peak_rss_kib": 90176,
+      "database_bytes": 102400
+    },
+    {
+      "devices": 100,
+      "events_per_request": 100,
+      "concurrency": 64,
+      "accepted": 100,
+      "stored_events": 10000,
+      "elapsed_seconds": 0.689,
+      "p95_seconds": 0.646,
+      "cpu_seconds": 0.372,
+      "process_peak_rss_kib": 96192,
+      "database_bytes": 1888256
+    },
+    {
+      "devices": 500,
+      "events_per_request": 1,
+      "concurrency": 64,
+      "accepted": 500,
+      "stored_events": 500,
+      "elapsed_seconds": 2.226,
+      "p95_seconds": 2.113,
+      "cpu_seconds": 0.981,
+      "process_peak_rss_kib": 96192,
+      "database_bytes": 200704
+    },
+    {
+      "devices": 500,
+      "events_per_request": 100,
+      "concurrency": 64,
+      "accepted": 500,
+      "stored_events": 50000,
+      "elapsed_seconds": 3.407,
+      "p95_seconds": 3.232,
+      "cpu_seconds": 1.694,
+      "process_peak_rss_kib": 111828,
+      "database_bytes": 9392128
+    }
+  ]
+}

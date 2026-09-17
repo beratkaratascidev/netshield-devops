@@ -1,15 +1,11 @@
-import http.client
 import json
-import shutil
-import ssl
-import subprocess
+import sqlite3
 import tempfile
-import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from netshield.agent_receiver import Receiver, TLSServer, digest, handler_for
+from netshield.agent_receiver import Receiver, digest
 from netshield.core.agent_status import read_snapshot, status_label, validate_status
 from netshield.core.settings import save_settings
 
@@ -33,7 +29,7 @@ class AgentTests(unittest.TestCase):
         for identity, token in [('pc1', 'wrong'), ('other', 'secret')]:
             with self.assertRaises(PermissionError):
                 self.receiver.accept(identity, token, payload())
-        self.assertFalse(self.receiver.status_path.exists())
+        self.assertEqual(read_snapshot(self.settings), ({}, None))
         self.receiver.accept('pc1', 'secret', payload())
         self.credentials.write_text('{}')
         with self.assertRaises(PermissionError):
@@ -65,7 +61,7 @@ class AgentTests(unittest.TestCase):
         self.assertIn('kapanış bilinmiyor', status_label(record, record['received_at'] + 91))
         record['events'][-1]['kind'] = 'agent_stopped'
         self.assertEqual(status_label(record, record['received_at']), 'Ajan durduruldu')
-        self.assertNotIn('secret', self.receiver.status_path.read_text())
+        self.assertNotIn(b'secret', self.receiver.status_path.read_bytes())
 
     def test_event_history_is_bounded_and_survives_restart(self):
         first = payload()
@@ -101,38 +97,5 @@ class AgentTests(unittest.TestCase):
     def test_corrupt_snapshot_fails_closed(self):
         self.receiver.status_path.write_text('{broken')
         self.assertEqual(read_snapshot(self.settings)[0], {})
-        with self.assertRaises(ValueError):
+        with self.assertRaises(sqlite3.DatabaseError):
             Receiver(self.settings)
-
-    @unittest.skipUnless(shutil.which('openssl'), 'openssl required for TLS integration')
-    def test_real_tls_authenticated_request_and_rejected_certificate(self):
-        cert = self.settings.parent / 'cert.pem'
-        key = self.settings.parent / 'key.pem'
-        subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
-                        '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost',
-                        '-keyout', str(key), '-out', str(cert)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        tls.load_cert_chain(cert, key)
-        server = TLSServer(('127.0.0.1', 0), handler_for(self.receiver))
-        server.tls = tls
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            rejected = http.client.HTTPSConnection('localhost', server.server_port, timeout=3)
-            try:
-                with self.assertRaises(ssl.SSLCertVerificationError):
-                    rejected.request('POST', '/v1/status/pc1', json.dumps(payload()))
-            finally:
-                rejected.close()
-            context = ssl.create_default_context(cafile=str(cert))
-            for token, expected in [('wrong', 403), ('secret', 204)]:
-                connection = http.client.HTTPSConnection('localhost', server.server_port, context=context, timeout=3)
-                try:
-                    connection.request('POST', '/v1/status/pc1', json.dumps(payload()), {'Authorization': 'Bearer ' + token})
-                    self.assertEqual(connection.getresponse().status, expected)
-                finally:
-                    connection.close()
-        finally:
-            server.shutdown()
-            server.server_close()
-            thread.join(timeout=3)

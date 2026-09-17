@@ -1,5 +1,6 @@
 """Local employee/device directory and passive, bounded traffic summaries."""
 import ipaddress
+from collections import defaultdict
 from netshield.core.tracking import summarize
 
 
@@ -40,3 +41,26 @@ def device_activity(device, packets, alerts):
                 received_bytes=sum(p.get('length', 0) for p in packets if p['dst'] == ip),
                 conversations=summary['conversations'], events=alerts,
                 status='Gözlendi' if packets else 'Yalnızca alarm' if alerts else 'Gözlenmedi')
+
+
+class DeviceActivityIndex:
+    """Index a retained preview once, instead of rescanning it for every device."""
+    def __init__(self, packets, alerts):
+        self.packets = defaultdict(list)
+        self.alerts = defaultdict(list)
+        for packet in packets:
+            for ip in {packet['src'], packet['dst']}:
+                self.packets[(ip, '')].append(packet)
+                interface = packet.get('interface', '')
+                if interface:
+                    self.packets[(ip, interface)].append(packet)
+        for event in alerts:
+            for ip in {event.get('ip'), event.get('dst')} - {None, '', 'Çoklu kaynak'}:
+                self.alerts[(ip, '')].append(event)
+                interface = event.get('interface', '')
+                if interface:
+                    self.alerts[(ip, interface)].append(event)
+
+    def activity(self, device):
+        key = (device['ip'], device['interface'])
+        return device_activity(device, self.packets.get(key, ()), self.alerts.get(key, ()))

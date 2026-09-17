@@ -239,3 +239,7 @@ Windows cihaz durumu** sekmesi; cihaz kimliğine göre açılış bildirimi, son
 ve kilit/uyku olaylarını gösterir. IP üzerinden uzaktan erişim gerektirmez; Windows
 bilgisayarda görünür ajan çalışmalıdır. Gerçek Windows testi bekleyen pilot sürümdür.
 [Kurulum, sınırlar ve pilot kontrolü](agents/windows/README.md).
+
+HTTPS alıcısının güncel bağımlılıkları, SQLite geçişi ve saklama ayarları:
+[Alıcı işletim rehberi](docs/RECEIVER_OPERATIONS.md). Tüm iyileştirmelerin tamamlanma
+durumu: [uygulama takibi](docs/IMPLEMENTATION_STATUS.md).

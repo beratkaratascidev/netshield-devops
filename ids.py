@@ -216,6 +216,10 @@ class App(WorkspaceUI):
         self._closed = True
         if self._after_id is not None:
             self.root.after_cancel(self._after_id)
+        if hasattr(self, '_agent_reader'):
+            if self._agent_request_id is not None:
+                self.root.after_cancel(self._agent_request_id)
+            self._agent_reader.close()
         if self.motor:
             self.motor.dur()
         self.root.destroy()

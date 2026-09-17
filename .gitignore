@@ -7,3 +7,5 @@ agent-config*.json
 agent-credentials.json
 agent-status.json
 *.key
+.venv/
+agent-status.sqlite3*

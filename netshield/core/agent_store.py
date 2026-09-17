@@ -1,0 +1,173 @@
+"""Transactional local agent data. No credentials, packet contents or outbound IO."""
+import os
+import sqlite3
+import stat
+import time
+from contextlib import contextmanager
+from pathlib import Path
+
+SCHEMA_VERSION = 1
+DISPLAY_EVENTS = 100
+MAX_EVENTS = 1000
+DEFAULT_RETENTION_DAYS = 30
+
+
+def database_path(settings_path):
+    return Path(settings_path).parent / 'agent-status.sqlite3'
+
+
+def _check_path(path):
+    metadata = path.lstat()
+    if not stat.S_ISREG(metadata.st_mode):
+        raise ValueError('Ajan veritabanı normal bir dosya olmalı.')
+    if os.name == 'posix' and (metadata.st_uid != os.geteuid() or metadata.st_mode & 0o077):
+        raise ValueError('Ajan veritabanı bu kullanıcıya ait ve 0600 izinli olmalı.')
+
+
+@contextmanager
+def connection(path, readonly=False):
+    path = Path(path)
+    _check_path(path)
+    conn = sqlite3.connect(path.resolve().as_uri() + ('?mode=ro' if readonly else '?mode=rw'),
+                           uri=True, timeout=2, isolation_level=None)
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute('PRAGMA foreign_keys=ON')
+        if readonly:
+            conn.execute('PRAGMA query_only=ON')
+        else:
+            conn.execute('PRAGMA synchronous=FULL')
+        yield conn
+    finally:
+        conn.close()
+
+
+def _version(conn):
+    if conn.execute('PRAGMA user_version').fetchone()[0] != SCHEMA_VERSION:
+        raise ValueError('Desteklenmeyen ajan veritabanı sürümü.')
+
+
+class AgentStore:
+    def __init__(self, settings_path, retention_days=DEFAULT_RETENTION_DAYS):
+        if type(retention_days) is not int or not 1 <= retention_days <= 365:
+            raise ValueError('Saklama süresi 1–365 gün olmalı.')
+        self.retention_days = retention_days
+        self.path = database_path(settings_path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            os.close(fd)
+        with connection(self.path) as conn:
+            version = conn.execute('PRAGMA user_version').fetchone()[0]
+            if version not in (0, SCHEMA_VERSION):
+                raise ValueError('Desteklenmeyen ajan veritabanı sürümü.')
+            conn.execute('PRAGMA journal_mode=WAL')
+            conn.execute('PRAGMA secure_delete=ON')
+            conn.execute('BEGIN IMMEDIATE')
+            try:
+                conn.execute('CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+                conn.execute('''CREATE TABLE IF NOT EXISTS devices (
+                    id TEXT PRIMARY KEY, boot_time TEXT NOT NULL, session TEXT NOT NULL,
+                    received_at REAL NOT NULL)''')
+                conn.execute('''CREATE TABLE IF NOT EXISTS events (
+                    position INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+                    event_id TEXT NOT NULL, kind TEXT NOT NULL, source_time TEXT NOT NULL,
+                    received_at REAL NOT NULL, UNIQUE(device_id, event_id))''')
+                conn.execute('CREATE INDEX IF NOT EXISTS events_device_position ON events(device_id, position DESC)')
+                conn.execute('CREATE INDEX IF NOT EXISTS events_received ON events(received_at)')
+                if not conn.execute("SELECT 1 FROM metadata WHERE key='legacy_imported'").fetchone():
+                    from netshield.core.agent_status import read_legacy_snapshot, validate_status
+                    legacy, error = read_legacy_snapshot(settings_path)
+                    if error:
+                        raise ValueError(error)
+                    for identity, record in legacy.items():
+                        normalized = validate_status({k: record[k] for k in ('boot_time', 'session', 'events')})
+                        self._put(conn, identity, normalized, record['received_at'])
+                    conn.execute("INSERT INTO metadata VALUES ('legacy_imported', '1')")
+                conn.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+
+    @staticmethod
+    def _put(conn, identity, data, received_at):
+        conn.execute('''INSERT INTO devices VALUES (?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET boot_time=excluded.boot_time,
+            session=excluded.session, received_at=excluded.received_at''',
+                     (identity, data['boot_time'], data['session'], received_at))
+        for event in data['events']:
+            previous = conn.execute('SELECT kind, source_time FROM events WHERE device_id=? AND event_id=?',
+                                    (identity, event['id'])).fetchone()
+            if previous and tuple(previous) != (event['kind'], event['time']):
+                raise ValueError('Aynı olay kimliği farklı içerikle kullanılamaz.')
+            conn.execute('''INSERT OR IGNORE INTO events
+                (device_id,event_id,kind,source_time,received_at) VALUES (?,?,?,?,?)''',
+                         (identity, event['id'], event['kind'], event['time'], received_at))
+        conn.execute('''DELETE FROM events WHERE device_id=? AND position NOT IN (
+            SELECT position FROM events WHERE device_id=? ORDER BY position DESC LIMIT ?)''',
+                     (identity, identity, MAX_EVENTS))
+
+    def accept(self, identity, data, valid_ids, received_at=None):
+        from netshield.core.agent_status import validate_status
+        data = validate_status(data)
+        now = time.time() if received_at is None else received_at
+        if identity not in valid_ids:
+            raise PermissionError()
+        with connection(self.path) as conn:
+            _version(conn)
+            conn.execute('BEGIN IMMEDIATE')
+            try:
+                self._prune(conn, valid_ids, now)
+                self._put(conn, identity, data, now)
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+        # Return ACK only after commit; re-delivery uses UNIQUE(device_id,event_id).
+        return [event['id'] for event in data['events']]
+
+    def _prune(self, conn, valid_ids, now):
+        valid = set(valid_ids)
+        for row in conn.execute('SELECT id FROM devices').fetchall():
+            if row['id'] not in valid:
+                conn.execute('DELETE FROM devices WHERE id=?', (row['id'],))
+        cutoff = now - self.retention_days * 86400
+        conn.execute('DELETE FROM events WHERE received_at < ?', (cutoff,))
+        conn.execute('DELETE FROM devices WHERE received_at < ?', (cutoff,))
+
+    def maintain(self, valid_ids, now=None):
+        with connection(self.path) as conn:
+            _version(conn)
+            conn.execute('BEGIN IMMEDIATE')
+            try:
+                self._prune(conn, valid_ids, time.time() if now is None else now)
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+            conn.execute('PRAGMA wal_checkpoint(PASSIVE)')
+
+
+def read_database(settings_path):
+    with connection(database_path(settings_path), readonly=True) as conn:
+        _version(conn)
+        conn.execute('BEGIN')
+        try:
+            rows = conn.execute('SELECT * FROM devices LIMIT 501').fetchall()
+            if len(rows) > 500:
+                raise ValueError('Ajan cihaz sınırı aşıldı.')
+            result = {}
+            for row in rows:
+                events = conn.execute('''SELECT event_id, kind, source_time FROM events
+                    WHERE device_id=? ORDER BY position DESC LIMIT ?''', (row['id'], DISPLAY_EVENTS)).fetchall()
+                result[row['id']] = dict(boot_time=row['boot_time'], session=row['session'], received_at=row['received_at'],
+                    events=[dict(id=e['event_id'], kind=e['kind'], time=e['source_time']) for e in reversed(events)])
+            conn.commit()
+            return result
+        except BaseException:
+            conn.rollback()
+            raise

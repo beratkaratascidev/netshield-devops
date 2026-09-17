@@ -3,10 +3,11 @@ import shlex
 import uuid
 import time
 from datetime import datetime
-from netshield.core.agent_status import read_snapshot, status_label
+from netshield.core.agent_status import status_label
+from netshield.core.snapshot_reader import SnapshotReader
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
-from netshield.core.inventory import device_activity
+from netshield.core.inventory import DeviceActivityIndex
 from netshield.ui.theme import SURF, CARD, TXT, MUT
 
 
@@ -96,10 +97,11 @@ class InventoryPanel:
         query = self._device_search.get().strip().casefold()
         self._device_rows = {}
         rows = []
+        index = DeviceActivityIndex(packets, alerts)
         for device in self.preferences['devices']:
             if query and not any(query in device[k].casefold() for k in ('name', 'department', 'ip')):
                 continue
-            activity = device_activity(device, packets, alerts)
+            activity = index.activity(device)
             self._device_rows[device['id']] = activity
             rows.append((device['id'], [device['name'], device['department'], device['ip'], device['interface'] or 'Tümü',
                 activity['status'], activity['sent_bytes'], activity['received_bytes'], activity['alerts'], activity['last']]))
@@ -155,6 +157,10 @@ class InventoryPanel:
         self._agent_tree = self._table(page, [('name', 'Ad / cihaz', 130), ('department', 'Bölüm', 100),
             ('state', 'Ajan durumu', 270), ('seen', 'Son bildirim', 165), ('boot', 'Windows açılış bildirimi', 205)])
         self._agent_records = {}
+        self._agent_error = None
+        self._agent_reader = SnapshotReader(self.settings_path)
+        self._agent_request_id = None
+        self._agent_refresh_pending = False
         self._agent_tree.bind('<<TreeviewSelect>>', lambda _: self._show_agent_details())
         self._agent_refreshed = 0
         tabs.bind('<<NotebookTabChanged>>', lambda _: self._refresh_agent_panel())
@@ -163,18 +169,39 @@ class InventoryPanel:
         if not hasattr(self, '_agent_tree'):
             return
         self._agent_refreshed = time.monotonic()
-        self._agent_records, error = read_snapshot(self.settings_path)
-        self._agent_notice.configure(text=error or 'Son durum yerel alıcıdan okunur. Bağlantı kaybı bilgisayarın kapandığını kanıtlamaz.')
+        self._render_agent_panel()
+        if self._agent_reader.request():
+            self._agent_request_id = self.root.after(25, self._poll_agent_snapshot)
+        else:
+            self._agent_refresh_pending = True
+
+    def _poll_agent_snapshot(self):
+        self._agent_request_id = None
+        if self._closed:
+            return
+        result = self._agent_reader.poll()
+        if result is None:
+            self._agent_request_id = self.root.after(25, self._poll_agent_snapshot)
+            return
+        self._agent_records, self._agent_error = result
+        self._render_agent_panel()
+        if self._agent_refresh_pending:
+            self._agent_refresh_pending = False
+            self._refresh_agent_panel()
+
+    def _render_agent_panel(self):
+        self._agent_notice.configure(text=self._agent_error or 'Son durum yerel alıcıdan okunur. Bağlantı kaybı bilgisayarın kapandığını kanıtlamaz.')
         wanted = {d['id'] for d in self.preferences['devices']}
         for key in set(self._agent_tree.get_children()) - wanted:
             self._agent_tree.delete(key)
         for device in self.preferences['devices']:
             record = self._agent_records.get(device['id'])
-            values = (device['name'], device['department'], status_label(record),
+            values = (device['name'], device['department'], 'Veri okunamadı' if self._agent_error else status_label(record),
                       datetime.fromtimestamp(record['received_at']).strftime('%Y-%m-%d %H:%M:%S') if record else '—',
                       record['boot_time'] if record else '—')
             if self._agent_tree.exists(device['id']):
-                self._agent_tree.item(device['id'], values=values)
+                if self._agent_tree.item(device['id'], 'values') != tuple(str(v) for v in values):
+                    self._agent_tree.item(device['id'], values=values)
             else:
                 self._agent_tree.insert('', 'end', iid=device['id'], values=values)
         self._apply_table_order(self._agent_tree)

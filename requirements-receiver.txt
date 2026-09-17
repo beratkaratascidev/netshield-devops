@@ -1,0 +1,2 @@
+# Optional HTTPS receiver; the passive desktop does not require this dependency.
+aiohttp==3.14.3

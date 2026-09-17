@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import time
 import tkinter as tk
 import unittest
 from pathlib import Path
@@ -27,6 +28,14 @@ class WorkspaceTests(unittest.TestCase):
         self.app.kapat()
         self.settings_dir.cleanup()
         self.assertEqual(self.errors, [])
+
+    def wait_agent_refresh(self):
+        deadline = time.monotonic() + 3
+        while self.app._agent_request_id is not None or self.app._agent_refresh_pending:
+            self.root.update()
+            if time.monotonic() > deadline:
+                self.fail('Status reader did not finish')
+            time.sleep(.005)
 
     def test_packet_selection_filter_alarm_and_export(self):
         a = self.app
@@ -187,6 +196,7 @@ class WorkspaceTests(unittest.TestCase):
         path = Path(a.settings_path).parent / 'agent-status.json'
         path.write_text(json.dumps({'windows1': record}))
         a._refresh_agent_panel()
+        self.wait_agent_refresh()
         self.assertEqual(a._agent_tree.set('windows1', 'state'), 'Bağlı · kilitli')
         a._agent_tree.selection_set('windows1')
         a._show_agent_details()
@@ -195,11 +205,38 @@ class WorkspaceTests(unittest.TestCase):
         record['received_at'] -= 100
         path.write_text(json.dumps({'windows1': record}))
         a._refresh_agent_panel()
+        self.wait_agent_refresh()
         self.assertIn('kapanış bilinmiyor', a._agent_tree.set('windows1', 'state'))
         path.write_text('{corrupt')
         a._refresh_agent_panel()
-        self.assertEqual(a._agent_tree.set('windows1', 'state'), 'Ajan verisi yok')
+        self.wait_agent_refresh()
+        self.assertEqual(a._agent_tree.set('windows1', 'state'), 'Veri okunamadı')
         self.assertIn('okunamadı', a._agent_notice.cget('text'))
+
+    def test_gui_callbacks_continue_during_slow_status_read(self):
+        import threading
+        a = self.app
+        self.root.update()
+        self.wait_agent_refresh()
+        release, entered = threading.Event(), threading.Event()
+        a._agent_reader.cached = None
+        def loader(_):
+            entered.set()
+            release.wait(2)
+            return {}, None
+        try:
+            with patch.object(a._agent_reader, 'loader', side_effect=loader):
+                a._refresh_agent_panel()
+                self.assertTrue(entered.wait(1))
+                marker = []
+                self.root.after(0, lambda: marker.append('responsive'))
+                self.root.update()
+                self.assertEqual(marker, ['responsive'])
+                self.assertIsNotNone(a._agent_request_id)
+                release.set()
+                self.wait_agent_refresh()
+        finally:
+            release.set()
 
     def test_multiple_interface_selection_and_status_view(self):
         a = self.app

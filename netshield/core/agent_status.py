@@ -1,7 +1,10 @@
 """Strict status protocol shared by the receiver and local dashboard."""
 import json
+import os
+import stat
 import math
 import time
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 
@@ -36,10 +39,14 @@ def validate_status(data):
     return dict(boot_time=timestamp(data['boot_time']), session=data['session'], events=events)
 
 
-def read_snapshot(settings_path):
+def read_legacy_snapshot(settings_path):
     path = Path(settings_path).parent / 'agent-status.json'
     try:
-        with path.open(encoding='utf-8') as source:
+        fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0) | getattr(os, 'O_NOFOLLOW', 0))
+        with os.fdopen(fd, encoding='utf-8') as source:
+            metadata = os.fstat(source.fileno())
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 8 * 1024 * 1024:
+                raise ValueError('Durum dosyası en fazla 8 MiB boyutunda normal bir dosya olmalı.')
             raw = source.read(8 * 1024 * 1024 + 1)
         if len(raw) > 8 * 1024 * 1024:
             raise ValueError('Status file too large')
@@ -57,6 +64,23 @@ def read_snapshot(settings_path):
     except FileNotFoundError:
         return {}, None
     except (OSError, ValueError, TypeError, KeyError) as exc:
+        return {}, f'Ajan durumu okunamadı: {exc}'
+
+
+def read_snapshot(settings_path):
+    from netshield.core.agent_store import database_path, read_database
+    path = database_path(settings_path)
+    if not path.exists() and not path.is_symlink():
+        return read_legacy_snapshot(settings_path)
+    try:
+        records = read_database(settings_path)
+        for record in records.values():
+            validate_status({k: record[k] for k in ('boot_time', 'session', 'events')})
+            seen = record['received_at']
+            if type(seen) not in (int, float) or not math.isfinite(seen) or not 0 <= seen <= 253402214400:
+                raise ValueError('Invalid receive time')
+        return records, None
+    except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as exc:
         return {}, f'Ajan durumu okunamadı: {exc}'
 
 

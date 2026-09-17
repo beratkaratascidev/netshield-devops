@@ -121,3 +121,13 @@ Cihazın bildirdiği olay saatleri güvenilir sunucu saati olarak değerlendiril
 son görülme sunucunun alım saatidir. Bu pilot donanımsal kimlik doğrulama, çok
 kiracılı RBAC, servis sürekliliği veya kurcalamaya dayanıklı denetim kaydı sağlamaz.
 Saklama ve Windows pilot kontrol adımları: [ajan rehberi](agents/windows/README.md).
+
+### Alıcı deposu ve eşzamanlılık güncellemesi
+
+HTTPS alıcısı aiohttp ve SQLite WAL kullanır. Bildirimler commit sonrasında onaylanır;
+aynı olay kimliği farklı içerikle kabul edilmez. Sınırlı etkin POST sayısı ve tek DB
+işçisi kullanılır. Saklama varsayılanı 30 gün, cihaz başına 1.000 olay; panelde son
+100 olaydır. Süre ve kayıt silme bakımı alıcı açıkken 60 saniyede bir çalışır.
+Eski JSON otomatik aktarılır ancak kaynak dosya otomatik silinmez. DB varken eski
+JSON'a sessiz geri dönüş yapılmaz. Disk okumaları GUI dışında yürütülür.
+[Kurulum, protokol, testler ve sınırlar](docs/RECEIVER_OPERATIONS.md).
