@@ -124,6 +124,58 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(a.preferences['devices'], [])
         self.assertEqual(a._device_tree.get_children(), ())
 
+    def test_saving_reveals_device_despite_search_and_inactive_tracking_page(self):
+        a = self.app
+        a._device_search.set('does-not-match')
+        a._notebook.select(0)
+        device = dict(id='new-device', name='New PC', department='Dev', ip='192.0.2.99', interface='')
+        self.assertTrue(a._save_device(device))
+        self.assertEqual(a._device_search.get(), '')
+        self.assertEqual(a._notebook.select(), str(a._tracking_page))
+        self.assertEqual(a._tracking_tabs.select(), str(a._inventory_page))
+        self.assertEqual(a._device_tree.selection(), ('new-device',))
+        self.assertEqual(a._agent_tree.selection(), ('new-device',))
+        self.assertEqual(a._agent_tree.set('new-device', 'state'), 'Ajan verisi yok')
+        self.assertIn('New PC', a._device_detail.get('1.0', 'end'))
+        a._tracking_tabs.select(a._agent_page)
+        self.assertTrue(a._save_device(dict(device, name='Updated PC')))
+        self.assertEqual(a._tracking_tabs.select(), str(a._agent_page))
+        self.assertEqual(a._agent_tree.set('new-device', 'name'), 'Updated PC')
+        with patch('netshield.ui.inventory.messagebox.askyesno', return_value=True):
+            a._remove_device()
+        self.assertEqual(a._agent_tree.get_children(), ())
+
+    def test_add_device_dialog_from_windows_tab_reveals_saved_record(self):
+        from tkinter import ttk
+        a = self.app
+        a._notebook.select(a._tracking_page)
+        a._tracking_tabs.select(a._agent_page)
+        a._device_search.set('old-filter')
+        a._edit_device()
+        dialog = next(child for child in self.root.winfo_children() if isinstance(child, tk.Toplevel))
+        entries = [child for child in dialog.winfo_children() if type(child) is ttk.Entry]
+        for entry, value in zip(entries, ('Test PC', 'Yazılım', '192.0.2.55')):
+            entry.insert(0, value)
+        next(child for child in dialog.winfo_children() if isinstance(child, tk.Button) and child.cget('text') == 'Kaydet').invoke()
+        self.root.update()
+        self.assertFalse(dialog.winfo_exists())
+        identity = a.preferences['devices'][0]['id']
+        self.assertEqual(a._tracking_tabs.select(), str(a._agent_page))
+        self.assertEqual(a._agent_tree.selection(), (identity,))
+        self.assertEqual(a._agent_tree.set(identity, 'name'), 'Test PC')
+        self.assertEqual(a._device_tree.selection(), (identity,))
+
+    def test_failed_device_save_preserves_filters_and_existing_rows(self):
+        a = self.app
+        a._device_search.set('keep-this-search')
+        device = dict(id='failed', name='PC', department='Dev', ip='192.0.2.99', interface='')
+        with patch('netshield.ui.panels.save_settings', side_effect=OSError('disk full')), \
+                patch('netshield.ui.panels.messagebox.showerror'):
+            self.assertFalse(a._save_device(device))
+        self.assertEqual(a._device_search.get(), 'keep-this-search')
+        self.assertEqual(a.preferences['devices'], [])
+        self.assertFalse(a._agent_tree.exists('failed'))
+
     def test_windows_status_panel_uses_device_identity_and_ignores_packet_filters(self):
         import time
         a = self.app

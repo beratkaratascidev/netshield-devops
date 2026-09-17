@@ -13,6 +13,7 @@ from netshield.ui.theme import SURF, CARD, TXT, MUT
 class InventoryPanel:
     def _build_inventory(self, tabs):
         page = tk.Frame(tabs, bg=SURF)
+        self._inventory_page = page
         tabs.add(page, text='Çalışan / cihaz envanteri')
         bar = tk.Frame(page, bg=SURF, padx=10, pady=8)
         bar.pack(fill='x')
@@ -44,9 +45,19 @@ class InventoryPanel:
         records = [d for d in self.preferences['devices'] if d['id'] != device['id']] + [device]
         if not self._commit_preferences(devices=records):
             return False
+        # Saving must reveal the row even when a stale search or another tab is active.
+        agent_page_active = self._tracking_tabs.select() == str(self._agent_page)
+        self._notebook.select(self._tracking_page)
+        self._device_search.set('')
         self._change_tracking_scope()
-        if self._device_tree.exists(device['id']):
-            self._device_tree.selection_set(device['id'])
+        self._refresh_agent_panel()
+        self._tracking_tabs.select(self._agent_page if agent_page_active else self._inventory_page)
+        for tree in (self._device_tree, self._agent_tree):
+            tree.selection_set(device['id'])
+            tree.focus(device['id'])
+            tree.see(device['id'])
+        self._device_details()
+        self._show_agent_details()
         return True
 
     def _edit_device(self, editing=False):
@@ -79,6 +90,7 @@ class InventoryPanel:
         if device and messagebox.askyesno('Kaydı sil', f"{device['name']} envanterden silinsin mi?", parent=self.root):
             if self._commit_preferences(devices=[d for d in self.preferences['devices'] if d['id'] != device['id']]):
                 self._change_tracking_scope()
+                self._refresh_agent_panel()
 
     def _refresh_inventory(self, packets, alerts, replace):
         query = self._device_search.get().strip().casefold()
@@ -128,12 +140,16 @@ class InventoryPanel:
 
     def _build_agent_panel(self, tabs):
         page = tk.Frame(tabs, bg=SURF)
+        self._agent_page = page
         tabs.add(page, text='Windows cihaz durumu')
         tk.Label(page, text='HTTPS ajan bildirimi · IP yerine cihaz kimliği · ağ yakalamadan bağımsız',
                  bg=SURF, fg=MUT, padx=10, pady=10).pack(anchor='w')
         self._agent_notice = tk.Label(page, text='Alıcı ayrı başlatılır; otomatik ağ bağlantısı açılmaz.', bg=SURF, fg=MUT)
         self._agent_notice.pack(anchor='w', padx=10)
-        self._button(page, 'Yenile', self._refresh_agent_panel).pack(anchor='w', padx=10, pady=6)
+        actions = tk.Frame(page, bg=SURF)
+        actions.pack(fill='x', padx=10, pady=6)
+        self._button(actions, 'Cihaz ekle', self._edit_device).pack(side='left', padx=(0, 8))
+        self._button(actions, 'Yenile', self._refresh_agent_panel).pack(side='left')
         self._agent_details = scrolledtext.ScrolledText(page, height=9, bg=CARD, fg=TXT, state='disabled')
         self._agent_details.pack(side='bottom', fill='x', padx=10, pady=8)
         self._agent_tree = self._table(page, [('name', 'Ad / cihaz', 130), ('department', 'Bölüm', 100),
