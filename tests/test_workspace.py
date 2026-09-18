@@ -37,6 +37,32 @@ class WorkspaceTests(unittest.TestCase):
                 self.fail('Status reader did not finish')
             time.sleep(.005)
 
+    def test_firewall_refresh_keeps_gui_responsive_and_restores_system_rules(self):
+        import threading
+        entered, release = threading.Event(), threading.Event()
+        def snapshot():
+            entered.set()
+            if not release.wait(3):
+                raise TimeoutError('test worker stalled')
+            return {'192.0.2.1': [['saved kernel rule']]}
+        with patch.object(ids, 'is_root', return_value=True), patch.object(self.app._firewall, 'snapshot', side_effect=snapshot):
+            try:
+                self.app._refresh_firewall()
+                self.assertTrue(entered.wait(1))
+                ticks = []
+                self.root.after(0, lambda: ticks.append(True))
+                self.root.update()
+                self.assertEqual(ticks, [True])
+                release.set()
+                deadline = time.monotonic() + 3
+                while self.app._firewall_future is not None:
+                    self.root.update()
+                    self.assertLess(time.monotonic(), deadline)
+                    time.sleep(.005)
+                self.assertIn('192.0.2.1', self.app._ban_list.get(0))
+            finally:
+                release.set()
+
     def test_packet_selection_filter_alarm_and_export(self):
         a = self.app
         packet = dict(ts='12:00:00', src='192.168.1.20', dst='192.168.1.10',

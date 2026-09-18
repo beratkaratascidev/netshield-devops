@@ -139,6 +139,28 @@ class PacketNormalizationTests(unittest.TestCase):
         self.assertEqual(record['proto'], 'ARP')
         self.assertEqual(record['src'], '192.168.1.1')
 
+    def test_ipv6_echo_requests_trigger_but_replies_do_not(self):
+        from scapy.all import IPv6, ICMPv6EchoRequest, ICMPv6EchoReply
+        detector = Detector({'icmp_per_sec': 2})
+        base = IPv6(src='2001:db8::1', dst='2001:db8::2')
+        request = self.motor._normalize(base / ICMPv6EchoRequest())
+        reply = self.motor._normalize(base / ICMPv6EchoReply())
+        self.assertEqual(request['transport'], 'ICMPv6')
+        self.assertEqual(detector.process(reply, 100), [])
+        self.assertEqual(detector.process(request, 100), [])
+        self.assertEqual([e['tur'] for e in detector.process(request, 100)], ['ICMP'])
+
+    def test_http_request_split_between_packets_is_detected_once(self):
+        from scapy.all import IP, TCP, Raw
+        base = IP(src='192.0.2.1', dst='192.0.2.2')
+        first = base / TCP(sport=5000, dport=80, seq=100, flags='PA') / Raw(b'GET / HT')
+        second = base / TCP(sport=5000, dport=80, seq=108, flags='PA') / Raw(b'TP/1.1\r\n')
+        self.assertFalse(self.motor._normalize(first, 'lan1').get('http_request', False))
+        self.assertFalse(self.motor._normalize(second, 'lan2').get('http_request', False))
+        result = self.motor._normalize(second, 'lan1')
+        self.assertTrue(result['http_request'])
+        self.assertEqual(result['payload'], '')
+
     def test_dns_direction_and_payload_preview_limit(self):
         m = self.module
         for response in (0, 1):

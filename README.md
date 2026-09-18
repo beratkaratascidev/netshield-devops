@@ -209,8 +209,9 @@ Bu destek bilgisayarın erişebildiği Ethernet, Wi-Fi ve yapılandırılmış V
 arayüzleri içindir; aynı anda bağımsız Wi-Fi ağlarına bağlanmak için uygun ayrı
 adaptörler gerekir. `lo` yalnızca bilgisayar içi trafiktir. Uzak şubelerdeki ağlar
 bu uygulamaya otomatik bağlanmaz; uzaktan sensör/ajan alımı ve yeni ağ gönderim
-özelliği eklenmemiştir. Bu sürümde canlı yakalama root kontrolünü gerektirir.
-Scapy eksikliği ve yetki eksikliği artık günlükte ayrı mesajlarla belirtilir.
+özelliği eklenmemiştir. Açıkça seçilen canlı yakalamada izin, yakalama soketi açılarak kontrol edilir;
+Unix root kimliği tek kabul koşulu değildir. Scapy eksikliği ve soket erişim
+reddi ayrı mesajlarla belirtilir. Sürücü/izin kurulumu otomatik yapılmaz.
 
 ### Çalışan / cihaz envanteri
 
@@ -250,3 +251,20 @@ yapılandırma dosyası oluşturabilir, yerel alıcıdaki bildirimi kontrol edeb
 eşleştirmeyi iptal edebilirsiniz. Pencereyi daha sonra **Windows cihaz durumu →
 Eşleştir / bağlantıyı kontrol et** ile açabilirsiniz. Bu akış Windows'a otomatik
 kurulum yapmaz; alıcı ve görünür ajan ayrıca çalıştırılmalıdır.
+
+## Yerel yedek ve kurtarma
+
+Yedek gerçek envanter/olay verisi içerir ve şifrelenmez; güvenli yerel dizinde tutun.
+Anahtarlar hariçtir. Komutlar ağ isteği yapmaz. Dışa aktarım politikası yedek oluşturmayı
+da sınırlar. Örnek yolları kendi kurulumunuzla değiştirin:
+
+```bash
+.venv/bin/python -m netshield.backup create --settings /private/netshield/settings.json --output /private/backup.zip
+.venv/bin/python -m netshield.backup restore --archive /private/backup.zip --destination /private/netshield-recovered
+```
+
+Hedef yedek dosyası ve geri yükleme dizini önceden bulunmamalıdır. Canlı kurulumun
+üzerine yazılmaz. Kurtarılan dizini uygulama/alıcıyla kullanmadan önce komutun
+başarıyla bitmesini bekleyin; içeriği kontrol edin ve cihazları yeniden eşleştirin.
+Başarısız/yarıda kesilmiş kurtarma dizinini kullanmayın. Windows kurulum paketi,
+GUI yedek sihirbazı ve otomatik sürüm geri alma bu komutlarla tamamlanmış sayılmaz.

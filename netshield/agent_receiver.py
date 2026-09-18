@@ -12,7 +12,7 @@ from pathlib import Path
 
 from netshield.core.agent_status import validate_status
 from netshield.core.agent_store import AgentStore
-from netshield.core.enrollment import digest, read_credentials, enroll, revoke
+from netshield.core.enrollment import digest, read_credentials, enroll, revoke, credential_matches, activate_pending
 from netshield.core.settings import default_path, load_settings
 
 
@@ -64,7 +64,7 @@ class Receiver:
                 raise PermissionError()
             credentials = self._cached_file(self.credentials_path, lambda: read_credentials(self.credentials_path))
             expected = credentials.get(identity)
-            if not isinstance(expected, str) or not hmac.compare_digest(expected, digest(token)):
+            if not credential_matches(expected, token):
                 raise PermissionError()
             return valid
 
@@ -76,6 +76,10 @@ class Receiver:
             if now - self.last_write.get(identity, -100) < 2:
                 return False
             self.store.accept(identity, data, valid)
+            credentials = self._cached_file(self.credentials_path, lambda: read_credentials(self.credentials_path))
+            candidate = credentials.get(identity)
+            if isinstance(candidate, dict) and hmac.compare_digest(candidate['pending'], digest(token)):
+                activate_pending(self.settings_path, identity, token)
             self.last_write = {key: value for key, value in self.last_write.items() if key in valid}
             self.last_write[identity] = now
             return True
@@ -106,7 +110,7 @@ def create_app(receiver, max_inflight=128, body_timeout=5):
         return web.json_response(dict(code=code, **extra), status=status, headers=headers)
 
     async def receive(request):
-        nonlocal active
+        nonlocal active, maintenance_ok
         if active >= max_inflight:
             return response(503, 'receiver_busy')
         active += 1
@@ -130,12 +134,14 @@ def create_app(receiver, max_inflight=128, body_timeout=5):
             accepted = await run(receiver.accept, identity, token, data)
             if not accepted:
                 return response(429, 'retry_later')
+            maintenance_ok = True
             if request.match_info['version'] == '1':
                 return web.Response(status=204, headers={'Cache-Control': 'no-store'})
             return response(200, 'accepted', protocol=2, accepted_event_ids=[e['id'] for e in data['events']])
         except PermissionError:
             return response(403, 'invalid_credentials')
         except ConfigurationError:
+            maintenance_ok = False
             return response(503, 'configuration_unavailable')
         except (asyncio.TimeoutError, ConnectionError):
             return response(408, 'body_timeout')
@@ -144,6 +150,7 @@ def create_app(receiver, max_inflight=128, body_timeout=5):
         except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
             return response(400, 'invalid_payload')
         except (OSError, sqlite3.Error):
+            maintenance_ok = False
             return response(503, 'storage_unavailable')
         finally:
             active -= 1

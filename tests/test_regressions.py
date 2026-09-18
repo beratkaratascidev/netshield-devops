@@ -1,4 +1,5 @@
 import queue
+from concurrent.futures import ThreadPoolExecutor
 import subprocess
 import unittest
 import tempfile
@@ -18,7 +19,11 @@ class AppTests(unittest.TestCase):
         self.app = ids.App.__new__(ids.App)
         self.app.banned = {}
         self.app.root = Mock()
-        self.app._firewall_tag = 'netshield-test'
+        self.app._firewall = Mock()
+        self.app._firewall_future = None
+        self.app._firewall_after = None
+        self.app._firewall_worker = ThreadPoolExecutor(max_workers=1)
+        self.addCleanup(self.app._firewall_worker.shutdown)
         self.app.preferences = validate_settings({'security': {'allow_firewall': True}})
         self.app.managed_policy = {}
         root_patch = patch.object(ids, 'is_root', return_value=True)
@@ -51,26 +56,39 @@ class AppTests(unittest.TestCase):
             self.assertIn('&lt;test&gt;', html)
             launch.assert_not_called()
 
+    def finish_firewall(self):
+        try:
+            self.app._firewall_future.result(timeout=2)
+        except subprocess.SubprocessError:
+            pass
+        self.app.root.after.call_args.args[1]()
+
     def test_failed_ban_does_not_record_or_block_retry(self):
-        with patch.object(ids.subprocess, 'run', side_effect=subprocess.CalledProcessError(1, 'iptables')):
-            self.app._ban_ip('192.0.2.1', 'Manuel')
+        self.app._firewall.add.side_effect = subprocess.CalledProcessError(1, 'iptables')
+        self.app._ban_ip('192.0.2.1', 'Manuel')
+        self.finish_firewall()
         self.assertEqual(self.app.banned, {})
         self.app._ban_list.insert.assert_not_called()
-        with patch.object(ids.subprocess, 'run') as run:
-            self.app._ban_ip('192.0.2.1', 'Manuel')
-        run.assert_called_once()
+        self.app._firewall.add.side_effect = None
+        self.app._firewall.add.return_value = {'192.0.2.1': [['rule']]}
+        self.app._ban_ip('192.0.2.1', 'Manuel')
+        self.finish_firewall()
         self.assertIn('192.0.2.1', self.app.banned)
 
-    def test_failed_unban_preserves_record(self):
-        self.app.banned['192.0.2.1'] = {'tur': 'Manuel'}
+    def test_failed_unban_preserves_record_and_can_retry_in_simulation(self):
+        self.app.banned['192.0.2.1'] = [['rule']]
+        self.app.motor.sim = True
         self.app._ban_list.curselection.return_value = (0,)
         self.app._ban_list.get.return_value = '192.0.2.1 [Manuel]'
-        with patch.object(ids.subprocess, 'run', side_effect=subprocess.CalledProcessError(1, 'iptables')):
-            self.app._ban_kaldir()
+        self.app._firewall.remove.side_effect = subprocess.CalledProcessError(1, 'iptables')
+        self.app._ban_kaldir()
+        self.finish_firewall()
         self.assertIn('192.0.2.1', self.app.banned)
         self.app._ban_list.delete.assert_not_called()
-        with patch.object(ids.subprocess, 'run'):
-            self.app._ban_kaldir()
+        self.app._firewall.remove.side_effect = None
+        self.app._firewall.remove.return_value = {}
+        self.app._ban_kaldir()
+        self.finish_firewall()
         self.assertEqual(self.app.banned, {})
 
     def test_traffic_rate_and_idle(self):

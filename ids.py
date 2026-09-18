@@ -3,7 +3,7 @@
 import time
 import queue
 import subprocess
-import secrets
+from concurrent.futures import ThreadPoolExecutor
 import ipaddress
 from collections import OrderedDict, deque, defaultdict
 from datetime import datetime
@@ -12,6 +12,7 @@ from tkinter import messagebox, filedialog
 
 from netshield.config import ESIKLER, PACKET_HISTORY, ALERT_HISTORY
 from netshield.core.motor import Motor, SCAPY_OK
+from netshield.core.firewall import Firewall
 from netshield.core.filters import compile_filter
 from netshield.core.settings import default_path, load_settings
 from netshield.net.utils import is_root
@@ -39,7 +40,10 @@ class App(WorkspaceUI):
         self.managed_policy, policy_error = load_managed_policy()
         self.motor = None
         self.banned = {}
-        self._firewall_tag = 'netshield-' + secrets.token_hex(8)
+        self._firewall = Firewall()
+        self._firewall_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix='netshield-firewall')
+        self._firewall_future = None
+        self._firewall_after = None
         self.olaylar = []
         self.sayac = defaultdict(int)
         self.trafik = deque([0] * 90, maxlen=90)
@@ -57,6 +61,8 @@ class App(WorkspaceUI):
             self._syslog('HATA', policy_error)
         if settings_error:
             self._syslog('HATA', settings_error)
+        if autostart and is_root():
+            self._refresh_firewall()
         if autostart:
             self._motor_baslat()
             self._poll()
@@ -214,6 +220,9 @@ class App(WorkspaceUI):
 
     def kapat(self):
         self._closed = True
+        if self._firewall_after is not None:
+            self.root.after_cancel(self._firewall_after)
+        self._firewall_worker.shutdown(wait=False, cancel_futures=True)
         if self._after_id is not None:
             self.root.after_cancel(self._after_id)
         if hasattr(self, '_agent_reader'):
@@ -256,34 +265,49 @@ class App(WorkspaceUI):
         except ValueError as exc:
             self._syslog('HATA', str(exc))
             return
-        if ip in self.banned: return
-        try:
-            subprocess.run(["/usr/sbin/iptables","-w","3","-I","INPUT","1","-s",ip,"-m","comment","--comment",self._firewall_tag,"-j","DROP"],
-                           check=True,timeout=5,capture_output=True)
-        except Exception as ex:
-            self._syslog("HATA",f"iptables başarısız ({ip}): {ex}")
-            return
-        self.banned[ip] = {"tur":sebep,"ts":now_str()}
-        self._ban_list.insert("end", f"{ip}  [{sebep}]")
-        durum = "banlandı"
-        self._log_yaz(f"[{now_str()}] [BAN] {ip} {durum} — {sebep}\n","BAN")
+        self._firewall_job(lambda: self._firewall.add(ip), f'{ip} engelleme işlemi tamamlandı.')
 
     def _ban_kaldir(self):
-        if not self._security_allows('allow_firewall', firewall=True):
+        if not self._security_allows('allow_firewall', firewall=True, removing=True):
             return
-        sel = self._ban_list.curselection()
-        if not sel: return
-        item = self._ban_list.get(sel[0])
-        ip   = item.split()[0]
-        try:
-            subprocess.run(["/usr/sbin/iptables","-w","3","-D","INPUT","-s",ip,"-m","comment","--comment",self._firewall_tag,"-j","DROP"],
-                           check=True,timeout=5,capture_output=True)
-        except Exception as ex:
-            self._syslog("HATA",f"Kural silinemedi ({ip}): {ex}")
+        selection = self._ban_list.curselection()
+        if selection:
+            ip = self._ban_list.get(selection[0]).split()[0]
+            self._firewall_job(lambda: self._firewall.remove(ip), f'{ip} engeli kaldırıldı.')
+
+    def _refresh_firewall(self):
+        if not is_root():
+            self._syslog('HATA', 'Firewall listesini okumak için Linux yakalama sunucusunda yetki gerekir.')
             return
-        self.banned.pop(ip,None)
-        self._ban_list.delete(sel[0])
-        self._log_yaz(f"[{now_str()}] [OK] {ip} ban listesinden kaldırıldı.\n","OK")
+        self._firewall_job(self._firewall.snapshot, 'Sistemdeki NetShield kuralları okundu.')
+
+    def _firewall_job(self, operation, message):
+        if self._closed or self._firewall_future is not None:
+            self._syslog('SİSTEM', 'Firewall işlemi sürüyor; tamamlanmasını bekleyin.')
+            return
+        self._firewall_future = self._firewall_worker.submit(operation)
+        self._syslog('SİSTEM', 'Firewall işlemi arka planda yürütülüyor…')
+        def poll():
+            self._firewall_after = None
+            if self._closed:
+                return
+            if not self._firewall_future.done():
+                self._firewall_after = self.root.after(25, poll)
+                return
+            try:
+                self.banned = self._firewall_future.result()
+            except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                self._syslog('HATA', f'Firewall işlemi tamamlanamadı: {exc}. Listeyi yenileyin; sistem kısmen değişmiş olabilir.')
+            else:
+                self._ban_list.delete(0, 'end')
+                for ip, rules in self.banned.items():
+                    self._ban_list.insert('end', f'{ip}  [{len(rules)} NetShield kuralı]')
+                if hasattr(self, '_k_ban'):
+                    self._k_ban.configure(text=str(len(self.banned)))
+                self._syslog('SİSTEM', message)
+            finally:
+                self._firewall_future = None
+        self._firewall_after = self.root.after(25, poll)
 
     def _rapor(self):
         if not self._security_allows('allow_exports'):
@@ -305,7 +329,7 @@ class App(WorkspaceUI):
             return
         self._syslog('SİSTEM', 'Maskeli HTML raporu yerel dosyaya kaydedildi; tarayıcı açılmadı.')
 
-    def _security_allows(self, action, firewall=False):
+    def _security_allows(self, action, firewall=False, removing=False):
         self.managed_policy, error = load_managed_policy()
         if error:
             self._syslog('HATA', error)
@@ -313,7 +337,7 @@ class App(WorkspaceUI):
         if not policy[action]:
             self._syslog('HATA', 'Bu işlem etkin güvenlik politikası tarafından kapatıldı.')
             return False
-        if firewall and (self.motor is None or self.motor.sim or not is_root()):
+        if firewall and (not is_root() or (not removing and (self.motor is None or self.motor.sim))):
             self._syslog('HATA', 'Firewall işlemi yalnızca yetkili canlı oturumda kullanılabilir.')
             return False
         return True

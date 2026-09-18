@@ -15,7 +15,7 @@ performans ve yayın öncesi kontroller. Bu liste tamamlanmadan tüm hedef bitmi
 | Ayrıcalıklı yakalama yardımcısı | Bekliyor | Normal kullanıcıda yakalama, yetkisiz isteğin reddi |
 | IP'den bağımsız ajan envanteri | Opsiyonel IP tamam; zaman damgalı IP eşleştirme bekliyor | Birden çok IP'siz kayıt, seçilen cihazda doğru işlem ve boş IP ile filtre güvenliği testleri |
 | Roller, korumalı anahtar ve denetim izi | DPAPI/ACL kodu eklendi; gerçek Windows doğrulaması, roller ve denetim izi bekliyor | CurrentUser DPAPI; Windows smoke betiği; imza/hesap ayrımı açık |
-| Yedek/geri yükleme | Bekliyor | Geri yüklenen verinin doğruluğu ve anahtar hariç tutma |
+| Yedek/geri yükleme | Yerel CLI uygulandı; GUI sihirbazı ve gerçek dağıtım kabulü bekliyor | 200 olayın bağlamıyla geri dönüşü, anahtar hariç tutma, politika, bozuk arşiv ve üzerine yazma reddi |
 | Tanılama ve sürüm uyumluluğu | Ajan DNS/TLS/kimlik/ACK/kota kodları uygulandı; birleşik tanılama ekranı bekliyor | Core hata sınıflandırma, DB 1→2 geçmiş koruma, V1/V2 testleri |
 | Başlangıç oturum bilgisi ve saat sapması | Olay oturum/açılış bağlamı uygulandı; başlangıç kilit bilgisi, servis ve saat sapması bekliyor | Yeniden açma, geçmiş bağlamı, RDP/gerçek Windows ve saat ileri/geri testleri |
 | Tespit eşik/istisna/tekrar yönetimi | Bekliyor | Etiketli normal ve anormal trafik ölçümü |
@@ -49,3 +49,24 @@ bilgisini yeni bildirimden ayrı koruma, değişmiş bağlamla aynı kimliği re
 SQLite 1/2 → 3 ve kuyruk 1 → 2 geçişleri test edildi. Gerçek Tk testinde güncel
 #7 oturumu ile geçmiş #2 oturumu ayrı gösteriliyor. Bu servis için veri sözleşmesi
 hazırlığıdır; Windows servis hostu, görünür eşlikçi ve imzalı kurulum bitmiş değildir.
+
+Yeni düzeltme grubu: Firewall sistemden uzlaştırma (önceki etiketler dahil), GUI
+dışında komut çalıştırma ve simülasyonda yetkili engel kaldırma uygulandı. Testlerde
+sahte komut yürütücüsü kullanılır; gerçek firewall değiştirilmez. ICMPv6 Echo ve
+sınırlı HTTP/1 parçalı istek satırı tespiti eklendi. Canlı yakalamada Unix UID
+önkoşulu kaldırıldı; soket izni belirleyicidir. Bu ayrıcalıklı yardımcı/Windows
+sürücü testini tamamlamaz. Alıcı yazım hatası sağlık göstergesine yansır.
+
+Tüm kapsam henüz bitmedi: Windows servis/eşlikçi, gerçek Windows kabulü, roller ve
+denetim izi, GUI tanılama/yedekleme ekranı, ayrıcalıklı
+capture yardımcısı, tam TCP/HTTP analizi ve uzun süre/yanlış alarm ölçümleri açık.
+
+Anahtar geçişi de eklendi: mevcut anahtar yeni anahtarla ilk geçerli commit'e kadar
+çalışır; bekleyen anahtar 24 saat sonra reddedilir. Etkinleştirme yazım hatası sonrası
+retry/tekilleştirme, geçersiz payload'ın etkinleştirmemesi ve eski anahtarın korunması
+test edildi. Pencere bekleyen ve süresi dolmuş geçişi ayrı gösterir.
+
+Bu grup sonunda 117 Python testi ResourceWarning hata moduyla geçti. Firewall
+GUI duyarlılığı, sistem kuralı kurtarma, ICMPv6, parçalı HTTP, sağlık durumu, yedek
+ve anahtar geçişi yeni regresyonlarla kapsanıyor. Gerçek Windows/firewall kabulü
+ve imzalı dağıtım hâlâ yapılmadı; tüm hedef tamamlandı olarak işaretlenmedi.

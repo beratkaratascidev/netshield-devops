@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
-from netshield.core.enrollment import enroll, revoke, read_credentials, digest, server_origin
+from netshield.core.enrollment import enroll, revoke, read_credentials, digest, server_origin, credential_matches
 from netshield.core.settings import save_settings
 from netshield.core.inventory import validate_devices, device_activity
 
@@ -67,3 +67,38 @@ class EnrollmentTests(unittest.TestCase):
         for path in (self.settings, self.directory / 'agent-credentials.json', self.directory / 'agent-status.sqlite3'):
             with self.assertRaises(ValueError):
                 enroll(self.settings, 'pc0', 'https://host', path)
+
+    def test_pending_rotation_expires_without_disabling_active_key(self):
+        enroll(self.settings, 'pc0', 'https://host', self.directory / 'old.json')
+        old = json.loads((self.directory / 'old.json').read_text())['token']
+        enroll(self.settings, 'pc0', 'https://host', self.directory / 'new.json')
+        new = json.loads((self.directory / 'new.json').read_text())['token']
+        value = read_credentials(self.directory / 'agent-credentials.json')['pc0']
+        self.assertTrue(credential_matches(value, old))
+        self.assertTrue(credential_matches(value, new))
+        with patch('netshield.core.enrollment.time.time', return_value=value['pending_until']):
+            self.assertTrue(credential_matches(value, old))
+            self.assertFalse(credential_matches(value, new))
+
+    def test_rotation_activation_requires_valid_commit_and_survives_write_failure(self):
+        from netshield.agent_receiver import Receiver
+        from netshield.core.agent_status import read_snapshot
+        enroll(self.settings, 'pc0', 'https://host', self.directory / 'old.json')
+        old = json.loads((self.directory / 'old.json').read_text())['token']
+        enroll(self.settings, 'pc0', 'https://host', self.directory / 'new.json')
+        new = json.loads((self.directory / 'new.json').read_text())['token']
+        receiver = Receiver(self.settings)
+        data = dict(boot_time='2026-09-18T08:00:00Z', session='unknown', events=[
+            dict(id='a' * 32, kind='agent_started', time='2026-09-18T08:00:01Z')])
+        with self.assertRaises(ValueError):
+            receiver.accept('pc0', new, dict(data, session='invalid'))
+        receiver.authorize('pc0', old)
+        with patch('netshield.core.enrollment.private_write', side_effect=OSError('disk full')):
+            with self.assertRaises(OSError):
+                receiver.accept('pc0', new, data)
+        receiver.authorize('pc0', old)
+        receiver.authorize('pc0', new)
+        self.assertTrue(receiver.accept('pc0', new, data))
+        self.assertEqual(len(read_snapshot(self.settings)[0]['pc0']['events']), 1)
+        with self.assertRaises(PermissionError):
+            receiver.authorize('pc0', old)

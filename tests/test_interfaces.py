@@ -10,15 +10,29 @@ from netshield.config import ESIKLER
 
 
 class InterfaceTests(unittest.TestCase):
-    def test_missing_library_and_missing_privilege_have_distinct_errors(self):
-        for scapy, text in ((False, 'kurulu değil'), (True, 'yetkisi yok')):
-            q = queue.Queue()
-            m = motor.Motor(q, ESIKLER, simulation=False)
-            with patch.object(motor, 'SCAPY_OK', scapy), patch.object(motor, 'is_root', return_value=False):
-                m.baslat()
-            self.assertEqual(m.status, 'Hata')
-            self.assertIn(text, q.get_nowait()[2])
-            self.assertEqual(m._threads, [])
+    def test_missing_library_is_reported_without_starting_capture(self):
+        q = queue.Queue()
+        m = motor.Motor(q, ESIKLER, simulation=False)
+        with patch.object(motor, 'SCAPY_OK', False):
+            m.baslat()
+        self.assertEqual(m.status, 'Hata')
+        self.assertIn('kurulu değil', q.get_nowait()[2])
+        self.assertEqual(m._threads, [])
+
+    def test_explicit_capture_uses_socket_permission_not_unix_uid(self):
+        m = motor.Motor(queue.Queue(), ESIKLER, iface='test0', simulation=False)
+        with patch.object(motor, 'SCAPY_OK', True), patch.object(motor, 'is_root', return_value=False), patch.object(m, '_dinle') as listen:
+            m.baslat()
+            m.dur()
+            listen.assert_called_once_with('test0')
+
+    @unittest.skipUnless(motor.SCAPY_OK, 'Scapy optional')
+    def test_socket_denial_has_clear_error_without_global_privilege_assumption(self):
+        m = motor.Motor(queue.Queue(), ESIKLER, iface='test0', simulation=False)
+        with patch.object(motor.conf, 'L2listen', side_effect=PermissionError()):
+            m._dinle('test0')
+        self.assertEqual(m.status, 'Hata')
+        self.assertIn('yetkisi yok', m.q.get_nowait()[2])
 
     def test_selected_interfaces_start_once_and_stop_together(self):
         m = motor.Motor(queue.Queue(), ESIKLER, iface=['lan1', 'lan2', 'lan1'], simulation=False)

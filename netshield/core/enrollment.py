@@ -1,5 +1,6 @@
 """Local, explicit device pairing shared by GUI and CLI. Never sends data."""
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -31,9 +32,52 @@ def read_credentials(path):
         data = json.load(source)
     if not isinstance(data, dict) or len(data) > 500:
         raise ValueError('Geçersiz eşleştirme deposu.')
-    if any(not isinstance(k, str) or not isinstance(v, str) or not re.fullmatch(r'[0-9a-f]{64}', v) for k, v in data.items()):
-        raise ValueError('Geçersiz anahtar özeti.')
+    def valid_hash(value):
+        return isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value)
+    for identity, value in data.items():
+        if not isinstance(identity, str):
+            raise ValueError('Geçersiz cihaz kimliği.')
+        if valid_hash(value):
+            continue
+        if (not isinstance(value, dict) or set(value) != {'active', 'pending', 'pending_until'} or
+                not valid_hash(value['active']) or not valid_hash(value['pending']) or
+                type(value['pending_until']) is not int or not 0 < value['pending_until'] <= 253402214400):
+            raise ValueError('Geçersiz anahtar geçiş kaydı.')
     return data
+
+
+def credential_matches(value, token):
+    supplied = digest(token)
+    if isinstance(value, str):
+        return hmac.compare_digest(value, supplied)
+    if isinstance(value, dict):
+        active = hmac.compare_digest(value['active'], supplied)
+        pending = hmac.compare_digest(value['pending'], supplied)
+        return active or (pending and time.time() < value['pending_until'])
+    return False
+
+
+def activate_pending(settings_path, identity, token):
+    """Called only after a valid status commit; failed publication keeps both keys."""
+    path = Path(settings_path).parent / 'agent-credentials.json'
+    supplied = digest(token)
+    with enrollment_lock(path.parent):
+        credentials = read_credentials(path)
+        value = credentials.get(identity)
+        if not credential_matches(value, token):
+            raise PermissionError('Anahtar geçişi iptal edildi veya süresi doldu.')
+        if isinstance(value, dict) and hmac.compare_digest(value['pending'], supplied):
+            credentials[identity] = supplied
+            private_write(path, json.dumps(credentials))
+
+
+def pairing_state(settings_path, identity):
+    value = read_credentials(Path(settings_path).parent / 'agent-credentials.json').get(identity)
+    if value is None:
+        return 'not_enrolled'
+    if isinstance(value, dict):
+        return 'pending' if time.time() < value['pending_until'] else 'expired'
+    return 'active'
 
 
 def server_origin(value):
@@ -110,7 +154,12 @@ def enroll(settings_path, identity, server, output):
                 json.dump(dict(server=server, device_id=identity, token=token), stream)
                 stream.flush()
                 os.fsync(stream.fileno())
-            credentials[identity] = digest(token)
+            previous = credentials.get(identity)
+            if previous is None:
+                credentials[identity] = digest(token)
+            else:
+                active = previous if isinstance(previous, str) else previous['active']
+                credentials[identity] = dict(active=active, pending=digest(token), pending_until=int(time.time()) + 86400)
             private_write(credentials_path, json.dumps(credentials))
         except BaseException:
             output.unlink(missing_ok=True)

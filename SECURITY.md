@@ -22,9 +22,11 @@ RAM'e hiç girmediği veya Python belleğinden güvenli silindiği iddia edilmez
 | Pasif analiz bileşeninden harici sorgu / ağ gönderimi | Yok | Yok |
 
 Bireysel profilde pano ve firewall açıkça etkinleştirilebilir. Firewall için
-ayrıca root yetkili canlı oturum gerekir; simülasyonda ve normal kullanıcıyla
-çalışmaz. `sudo` çağrılmaz, shell metni yürütülmez. Eklenen kurallar oturuma özel
-bir yorumla tanımlanır. Mevcut OS kuralları topluca silinmez. Görünümü temizlemek,
+yeni engel eklemek için ayrıca root yetkili canlı oturum gerekir. Mevcut engeli
+kaldırmak için canlı yakalamanın açık olması gerekmez; root ve politika izni yine
+zorunludur. `sudo` çağrılmaz, shell metni yürütülmez. Yeni kurallar
+`netshield-managed-v1` yorumuyla tanımlanır. Önceki sürümün 16 hex karakterli
+oturum etiketleri de sistemden geri okunur; başka uygulamaların kuralları silinmez. Görünümü temizlemek,
 uygulamayı kapatmak veya bir izni kapatmak eklenmiş kuralları geri almaz.
 
 Kullanıcı tarafından seçilen profil bir rol veya kimlik doğrulama sistemi değildir.
@@ -175,3 +177,42 @@ Bu aşamada Windows servisi/otomatik başlatma uygulanmış sayılmaz. Ortak çe
 Linux'ta, Framework hedefi derlenerek ve gerçek HTTPS entegrasyonuyla doğrulandı;
 Windows DPAPI/NTFS ve etkileşimli oturum testleri için `agents/windows/Test-Agent.ps1`
 ve ajan rehberindeki kabul adımları kullanılmalıdır.
+
+### Firewall uzlaştırma ve HTTP parçaları
+
+Firewall işlemleri tek arka plan işçisinde yürütülür; Tk komut sonucunu beklemez.
+Yetkili açılışta ve “Sistemdeki engelleri yenile” ile Linux INPUT kuralları okunur.
+Yalnız beklenen tek IPv4 adresli, yorum etiketli DROP biçimi yönetilir; farklı
+biçimler/sistem kuralları kapsam dışıdır. Kurallar uygulama kapanınca kaldırılmaz.
+Kısmi komut hatasında listeyi yenileyin; sistemdeki durum bellektekinden farklı
+olabilir. Gerçek sistem firewall'ı bu geliştirme sırasında değiştirilmedi.
+
+HTTP/1 istek satırı tespiti için en fazla 1.024 akışın 512 baytlık başlangıcı geçici
+RAM'de birleştirilir. Parçalar 2 saniye sonra geçersizdir; canlı yakalama döngüsündeki
+periyodik temizlik ve yakalamayı durdurma bunları kaldırır. Bu RAM içeriği URL
+parçası içerebilir; ekrana, dosyaya, rapora veya ağa aktarılmaz. Python'da güvenli
+bellek sıfırlama garantisi yoktur. TCP boşlukları, aşırı uzun satırlar ve süresi geçen
+parçalar birleştirilmez. Tam TCP yeniden sıralama, HTTP/2/3 veya TLS çözme yapılmaz.
+
+### Yerel kurtarma yedeği
+
+`python -m netshield.backup create` dışa aktarım politikasını uygular. Yedek
+şifrelenmiş değildir; gerçek cihaz adları, IP'ler ve olay zamanları içerir. POSIX'te
+0600 dosya olarak atomik yayımlanır, mevcut dosyanın üzerine yazılmaz. Anahtarlar,
+sertifikalar ve ham paket içeriği arşive eklenmez. SQLite backup API WAL içindeki
+commit edilmiş verileri de tutarlı kopyaya dahil eder. ZIP CRC ve veritabanı
+bütünlük kontrolü imza/kimlik doğrulaması yerine geçmez; yalnız güvenilen yedekleri
+kullanın. Geri yükleme yalnız yeni dizine yapılır; ardından cihazlar yeniden
+eşleştirilir. Kurulumun canlı dizinine otomatik geçiş yapılmaz.
+
+### Kesintisiz anahtar geçişi
+
+Yeniden eşleştirme etkin anahtarı hemen iptal etmez. Yeni anahtarın yalnız özeti
+24 saat süreli bekleyen kayıt olarak tutulur. Yeni anahtarla doğrulanmış ve geçerli
+bir durum SQLite'a commit edildikten sonra eski anahtar kaldırılır. Etkinleştirme
+kaydı yazılamazsa ACK verilmez; eski anahtar korunur ve tekrar teslim tekilleştirilir.
+DB ve anahtar dosyası tek transaction değildir. Geçişin süresi dolarsa bekleyen
+anahtar reddedilir; mevcut etkin anahtar değişmez. `revoke` her iki anahtarı da
+kaldırır; şüpheli anahtarı acil iptal etmek için bu işlem kullanılmalıdır. Yeni bir
+geçiş oluşturmak önceki bekleyen anahtarı değiştirir. Dosya biçimi değiştiğinden
+alıcı/GUI/CLI birlikte güncellenmeli; eski okuyucu yeni geçiş kayıtlarını reddeder.

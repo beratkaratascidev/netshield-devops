@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from tkinter import ttk, filedialog
 
 from netshield.core.agent_status import read_snapshot, status_label
-from netshield.core.enrollment import enroll, revoke, server_origin
+from netshield.core.enrollment import enroll, revoke, server_origin, pairing_state
 from netshield.ui.theme import SURF, TXT, MUT
 
 
@@ -28,7 +28,7 @@ class PairingDialog:
         tk.Label(self.win, text='2. NetShield alıcısının HTTPS adresi', bg=SURF, fg=TXT).pack(anchor='w', padx=20)
         self.server = tk.StringVar()
         ttk.Entry(self.win, textvariable=self.server, width=58).pack(fill='x', padx=20, pady=6)
-        tk.Label(self.win, text='Örnek: https://netshield.sirketiniz:8443\nYeni yapılandırma oluşturmak bu cihazın önceki anahtarını geçersiz kılar.',
+        tk.Label(self.win, text='Örnek: https://netshield.sirketiniz:8443\nEski anahtar, yeni anahtarla ilk geçerli bildirim gelene kadar çalışır.\nYeni anahtarı etkinleştirmek için 24 saatiniz var. Acil iptal için aşağıdaki düğmeyi kullanın.',
                  bg=SURF, fg=MUT, justify='left').pack(anchor='w', padx=20, pady=6)
         self.generate_button = app._button(self.win, 'Eşleştirme dosyasını oluştur / yenile', self.generate, True)
         self.generate_button.pack(fill='x', padx=20, pady=6)
@@ -98,7 +98,7 @@ class PairingDialog:
 
     def check(self):
         def success(result):
-            records, error = result
+            records, error, state = result
             if error:
                 self.status.set(error)
                 return
@@ -107,8 +107,16 @@ class PairingDialog:
                 self.status.set('Yeni cihaz bildirimi bekleniyor. Alıcıyı ve Windows ajanını başlatın; iki tarafın aynı yapılandırmayı kullandığını kontrol edin.')
             else:
                 self.status.set('Alıcının bildirdiği cihaz durumu: ' + status_label(record))
+            labels = {'not_enrolled': 'Etkin eşleştirme anahtarı yok.',
+                      'pending': 'Yeni anahtar henüz etkinleşmedi; eski ajan bildirim göndermeye devam edebilir.',
+                      'expired': 'Yeni anahtarın 24 saatlik geçiş süresi doldu; yeni bir dosya oluşturun.',
+                      'active': 'Bekleyen anahtar geçişi yok.'}
+            self.status.set(self.status.get() + '\n' + labels[state])
             self.app._refresh_agent_panel()
-        self._start(lambda: read_snapshot(self.app.settings_path), success)
+        def read():
+            records, error = read_snapshot(self.app.settings_path)
+            return records, error, pairing_state(self.app.settings_path, self.device['id'])
+        self._start(read, success)
 
     def revoke(self):
         def success(_):

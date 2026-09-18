@@ -159,7 +159,9 @@ class AgentStore:
             conn.execute('PRAGMA wal_checkpoint(PASSIVE)')
 
 
-def read_database(settings_path):
+def read_database(settings_path, event_limit=DISPLAY_EVENTS):
+    if type(event_limit) is not int or not 1 <= event_limit <= MAX_EVENTS:
+        raise ValueError("Invalid event read limit")
     with connection(database_path(settings_path), readonly=True) as conn:
         _version(conn, allow_legacy=True)
         conn.execute('BEGIN')
@@ -171,7 +173,7 @@ def read_database(settings_path):
             event_details = 'details' in {row[1] for row in conn.execute('PRAGMA table_info(events)')}
             for row in rows:
                 events = conn.execute(f'''SELECT event_id, kind, source_time, {"details" if event_details else "'{}'"} AS details FROM events
-                    WHERE device_id=? ORDER BY position DESC LIMIT ?''', (row['id'], DISPLAY_EVENTS)).fetchall()
+                    WHERE device_id=? ORDER BY position DESC LIMIT ?''', (row['id'], event_limit)).fetchall()
                 extra = json.loads(row['details']) if 'details' in row.keys() else {}
                 if not isinstance(extra, dict) or set(extra) - {'agent_state', 'dropped_events', 'pending_events', 'session_id'}:
                     raise ValueError('Invalid stored agent diagnostics')

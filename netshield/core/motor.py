@@ -1,19 +1,19 @@
 """Capture, bounded packet previews and a shared live/demo detection pipeline."""
 import queue
 import random
-import re
 import threading
 import time
 from collections import deque
 from datetime import datetime
 
 try:
-    from scapy.all import (sniff, IP, IPv6, ARP, TCP, UDP, ICMP, DNS,
+    from scapy.all import (sniff, IP, IPv6, ARP, TCP, UDP, ICMP, ICMPv6EchoRequest, ICMPv6EchoReply, DNS,
                            get_if_list, conf, ETH_P_ALL)
     SCAPY_OK = True
 except ImportError:
     SCAPY_OK = False
     sniff = conf = IP = IPv6 = ARP = TCP = UDP = ICMP = DNS = None
+    ICMPv6EchoRequest = ICMPv6EchoReply = None
     ETH_P_ALL = 3
 
     def get_if_list():
@@ -23,7 +23,8 @@ from netshield.config import ESIKLER, HTTP_PORTS, PACKET_HISTORY
 from netshield.core.detection import Detector
 from netshield.net.utils import is_root
 
-HTTP_LINE = re.compile(rb'^(GET|HEAD|POST|PUT|DELETE|CONNECT|OPTIONS|TRACE|PATCH) [^ \r\n]+ HTTP/1\.[01]\r\n')
+from netshield.core.http_prefix import HTTPPrefixes
+
 
 
 def ts_str():
@@ -38,6 +39,7 @@ class Motor:
         self.iface = self.interfaces[0] if len(self.interfaces) == 1 else None
         self.sim = not (SCAPY_OK and is_root()) if simulation is None else simulation
         self._detectors = {}
+        self._http_prefixes = HTTPPrefixes()
         self._state_lock = threading.Lock()
         self._interface_state = {}
         self._go = True
@@ -61,10 +63,9 @@ class Motor:
     def baslat(self):
         if self._threads or self._stop.is_set():
             return
-        if not self.sim and (not SCAPY_OK or not is_root()):
+        if not self.sim and not SCAPY_OK:
             self.status = 'Hata'
-            reason = ('Scapy bu Python ortamında kurulu değil.' if not SCAPY_OK else
-                      'Scapy hazır; paket yakalama yetkisi yok. Terminalde sudo /usr/bin/python3 ids.py ile açın. Uygulama yetki yükseltmez.')
+            reason = 'Scapy bu Python ortamında kurulu değil.'
             self._emit(('LOG', 'HATA', reason))
             return
         self.status = 'Simülasyon' if self.sim else 'Başlatılıyor'
@@ -103,6 +104,8 @@ class Motor:
         deadline = time.monotonic() + 1.5
         for thread in self._threads:
             thread.join(timeout=max(0, deadline - time.monotonic()))
+        with self._packet_lock:
+            self._http_prefixes.pending.clear()
         self.status = 'Durduruldu'
         with self._state_lock:
             for entry in self._interface_state.values():
@@ -135,10 +138,19 @@ class Motor:
             while not self._stop.is_set():
                 sniff(opened_socket=capture_socket, prn=lambda packet: self._pkt(packet, iface), store=False,
                       timeout=1.0, stop_filter=lambda _: self._stop.is_set())
+                with self._packet_lock:
+                    self._http_prefixes.expire(time.monotonic())
+        except PermissionError:
+            self._interface_status(iface, 'Hata')
+            self._emit(('LOG', 'HATA', f'{iface}: Paket yakalama yetkisi yok. Yakalama sürücüsü ve hesap izinlerini kontrol edin.'))
         except Exception as exc:
             self._interface_status(iface, 'Hata')
             self._emit(('LOG', 'HATA', f'{iface}: {exc}'))
         finally:
+            with self._packet_lock:
+                for flow in list(self._http_prefixes.pending):
+                    if flow[0] == iface:
+                        del self._http_prefixes.pending[flow]
             if capture_socket is not None:
                 capture_socket.close()
 
@@ -146,13 +158,13 @@ class Motor:
         if not self._go:
             return
         with self._packet_lock:
-            normalized = self._normalize(packet)
+            normalized = self._normalize(packet, iface)
             if normalized:
                 if iface is not None:
                     normalized['interface'] = iface
                 self._ingest(normalized, time.monotonic())
 
-    def _normalize(self, packet):
+    def _normalize(self, packet, iface=None):
         if IP in packet:
             layer = packet[IP]
             version = 'IPv4'
@@ -181,7 +193,10 @@ class Motor:
                           dport=layer.dport, payload_size=payload_size)
             if transport == 'TCP':
                 record.update(flags=str(layer.flags), flags_value=int(layer.flags))
-                if layer.dport in HTTP_PORTS and HTTP_LINE.match(payload):
+                flow = (iface or self.iface or '', record['src'], record['dst'], layer.sport, layer.dport)
+                if layer.dport in HTTP_PORTS and self._http_prefixes.feed(
+                        flow, (int(layer.seq) + bool(int(layer.flags) & 2)) & 0xffffffff, payload,
+                        time.monotonic(), reset=bool(int(layer.flags) & 6)):
                     record.update(proto='HTTP', http_request=True)
             if DNS in packet:
                 record.update(proto='DNS', dns_query=int(packet[DNS].qr) == 0)
@@ -191,6 +206,10 @@ class Motor:
         elif ICMP in packet:
             record.update(proto='ICMP', transport='ICMP', icmp_type=packet[ICMP].type,
                           info=f'ICMP type={packet[ICMP].type} code={packet[ICMP].code}')
+        elif ICMPv6EchoRequest in packet or ICMPv6EchoReply in packet:
+            layer = packet[ICMPv6EchoRequest] if ICMPv6EchoRequest in packet else packet[ICMPv6EchoReply]
+            record.update(proto='ICMPv6', transport='ICMPv6', icmp_type=int(layer.type),
+                          info=f'ICMPv6 type={layer.type} code={layer.code}')
         return record
 
     def _ingest(self, record, ts):

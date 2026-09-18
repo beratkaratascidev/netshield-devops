@@ -106,7 +106,7 @@ class WorkspaceUI(AnalysisPanels):
         entry.bind('<Return>', lambda _: self._filtre_uygula())
         self._protocol = tk.StringVar(value='Tümü')
         protocol = ttk.Combobox(filterbar, textvariable=self._protocol, width=9, state='readonly',
-                                values=['Tümü', 'TCP', 'UDP', 'HTTP', 'DNS', 'ICMP', 'ARP', 'IPv6'])
+                                values=['Tümü', 'TCP', 'UDP', 'HTTP', 'DNS', 'ICMP', 'ICMPv6', 'ARP', 'IPv6'])
         protocol.pack(side='left', padx=7)
         protocol.bind('<<ComboboxSelected>>', lambda _: self._filtre_uygula())
         self._button(filterbar, 'Uygula', self._filtre_uygula).pack(side='left')
@@ -131,7 +131,7 @@ class WorkspaceUI(AnalysisPanels):
             ('id', 'No.', 55), ('ts', 'Zaman', 110), ('interface', 'Arayüz', 90), ('src', 'Kaynak', 140),
             ('dst', 'Hedef', 140), ('proto', 'Protokol', 75), ('mode', 'Mod', 80), ('length', 'Bayt', 55), ('info', 'Bilgi', 310)])
         for protocol_name, color in {'TCP': ACC, 'UDP': PRP, 'DNS': YLW, 'HTTP': GRN,
-                                     'ICMP': '#f5ac77', 'ARP': '#91d0cb', 'IPv6': MUT}.items():
+                                     'ICMP': '#f5ac77', 'ICMPv6': '#f5ac77', 'ARP': '#91d0cb', 'IPv6': MUT}.items():
             self._packet_tree.tag_configure(protocol_name, foreground=color)
         self._packet_tree.bind('<<TreeviewSelect>>', self._packet_selected)
         self._build_alarm_tools(alert_page)
@@ -172,13 +172,14 @@ class WorkspaceUI(AnalysisPanels):
             label.pack(side='right')
             self._stat_lbls[kind] = label
         tk.Frame(right, bg=BRD, height=1).pack(fill='x', pady=14)
-        tk.Label(right, text='OTURUM BAN LİSTESİ', bg=SURF, fg=MUT,
+        tk.Label(right, text='SİSTEMDEKİ NETSHIELD ENGELLERİ', bg=SURF, fg=MUT,
                  font=('DejaVu Sans', 9, 'bold')).pack(anchor='w')
         self._ban_list = tk.Listbox(right, bg=CARD, fg=YLW, relief='flat', height=3, highlightthickness=0,
                                     selectbackground=BRD, font=('DejaVu Sans Mono', 9))
         self._ban_list.pack(fill='both', expand=True, pady=8)
         self._button(right, 'Manuel IP engelle', self._manuel_ban).pack(fill='x', pady=3)
         self._button(right, 'Seçili engeli kaldır', self._ban_kaldir).pack(fill='x', pady=3)
+        self._button(right, 'Sistemdeki engelleri yenile', self._refresh_firewall).pack(fill='x', pady=3)
         tk.Label(right, text='Alarmlar eşik tabanlı şüphelerdir.\nOtomatik engelleme kapalı.', bg=SURF,
                  fg=MUT, justify='left', font=('DejaVu Sans', 8)).pack(anchor='w', pady=(10, 0))
         self._status = tk.Label(self.root, bg=BG, fg=MUT, anchor='w', padx=18, pady=10,

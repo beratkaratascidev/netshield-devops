@@ -105,9 +105,10 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(config['device_id'], 'pc1')
         self.assertEqual(output.stat().st_mode & 0o777, 0o600)
         self.assertNotIn(config['token'], self.credentials.read_text())
-        with self.assertRaises(PermissionError):
-            self.receiver.accept('pc1', 'secret', payload())
+        self.assertEqual(self.receiver.authorize('pc1', 'secret'), {'pc1'})
         self.assertTrue(self.receiver.accept('pc1', config['token'], payload()))
+        with self.assertRaises(PermissionError):
+            self.receiver.authorize('pc1', 'secret')
         with patch('sys.argv', prefix + ['revoke', '--device-id', 'pc1']), patch('builtins.print'):
             main()
         with self.assertRaises(PermissionError):

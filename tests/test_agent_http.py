@@ -77,10 +77,14 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase):
             async with self.client.post(self.base + '/v2/status/pc1', json=payload(), headers=self.headers) as r:
                 self.assertEqual(r.status, 503)
                 self.assertNotIn('accepted_event_ids', await r.json())
+            async with self.client.get(self.base + '/healthz') as r:
+                self.assertEqual(r.status, 503)
         async with self.client.post(self.base + '/v2/status/pc1', json=payload(), headers=self.headers) as r:
             self.assertEqual(r.status, 200)
             self.assertEqual((await r.json())['accepted_event_ids'], ['a' * 32])
             self.assertEqual(len(read_snapshot(self.settings)[0]['pc1']['events']), 1)
+        async with self.client.get(self.base + '/healthz') as r:
+            self.assertEqual(r.status, 200)
 
     async def test_slow_upload_does_not_block_other_requests(self):
         authorized = threading.Event()

@@ -55,7 +55,7 @@ class Detector:
         proto = packet['transport']
         flags = packet.get('flags_value', 0)
         rules = []
-        if proto == 'ICMP' and packet.get('icmp_type') == 8:
+        if (proto == 'ICMP' and packet.get('icmp_type') == 8) or (proto == 'ICMPv6' and packet.get('icmp_type') == 128):
             rules.append(('ICMP', 'icmp_per_sec'))
         if proto == 'UDP':
             rules.append(('UDP', 'udp_per_sec'))

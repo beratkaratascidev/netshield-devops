@@ -37,7 +37,7 @@ canlı/simülasyon paket filtrelerinden bağımsızdır; sahte demo ajan kaydı 
 ## 2. Alıcıyı hazırlayın (Linux)
 
 GUI eşleştirme penceresinde dosya oluşturduysanız `enroll` komutunu tekrar
-çalıştırmayın; yeni anahtar üretip önceki dosyayı geçersiz kılar. Aşağıdaki `enroll`
+çalıştırmayın; başka bir bekleyen anahtar üretip önceki bekleyen dosyayı geçersiz kılar. Aşağıdaki `enroll`
 satırı komut satırı kullanımı için alternatiftir. `serve` adımı yine gereklidir.
 
 Kurumsal CA veya güvenilen bir CA tarafından imzalanmış, sunucu DNS adını SAN
@@ -128,8 +128,11 @@ son olay yine kaybolabilir; bu sürüm tam fiziksel güç kaybı garantisi verme
 ```
 
 İptal sonraki istekte uygulanır. Panelde envanter kaydının silinmesi de sonraki
-bildirimleri reddeder. Yeniden `enroll` yeni anahtar üretir, eski anahtarı geçersiz
-kılar; yeni bir output yolu verin ve Windows yapılandırmasını güncelleyin.
+bildirimleri reddeder. Yeniden `enroll` bekleyen yeni anahtar üretir; eski anahtar
+yeni anahtarla ilk geçerli bildirim kaydedilene kadar çalışır. Yeni anahtar 24 saat
+içinde kullanılmalıdır; süre aşılırsa eski anahtar korunur, yeni dosya oluşturun.
+Yeni bir output yolu verin ve Windows yapılandırmasını güncelleyin. Anahtarın
+sızdığından şüpheleniyorsanız geçişi beklemeyin, `revoke` ile ikisini de iptal edin.
 
 ## Veri saklama ve pilot kabul kontrolü
 
@@ -207,3 +210,11 @@ Windows servisinde oturum olayının kendi SessionId bilgisi korunmalıdır;
 servis sürecinin Session 0 kimliği kullanıcı oturumu yerine yazılmamalıdır.
 Dayanaklar: [ServiceBase](https://learn.microsoft.com/en-us/dotnet/api/system.serviceprocess.servicebase),
 [oturum bildiriminin kapsamı](https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsregistersessionnotification).
+
+Anahtar geçişi için alıcı, GUI ve CLI birlikte güncellenmelidir. Eski sürümler yeni
+`active/pending/pending_until` kayıtlarını okuyamaz. Yeni anahtarla geçerli durum
+SQLite'a commit edildikten sonra eski anahtar kaldırılır. Anahtar deposu yazımı
+başarısızsa teslim onayı verilmez; her iki anahtar korunur, ajan aynı olayları tekrar
+gönderir ve olay kimliğiyle tekilleştirme uygulanır. İki depo arasında tek transaction
+yoktur; önce olayın kalıcı olması tercih edilir. Eşleştirme penceresi bekleyen/süresi
+dolmuş geçişi ayrıca gösterir; eski ajanın bildirimi yeni anahtarın etkinleşmesi sayılmaz.
