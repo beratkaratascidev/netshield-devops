@@ -17,7 +17,7 @@ performans ve yayın öncesi kontroller. Bu liste tamamlanmadan tüm hedef bitmi
 | Roller, korumalı anahtar ve denetim izi | DPAPI/ACL kodu eklendi; gerçek Windows doğrulaması, roller ve denetim izi bekliyor | CurrentUser DPAPI; Windows smoke betiği; imza/hesap ayrımı açık |
 | Yedek/geri yükleme | Bekliyor | Geri yüklenen verinin doğruluğu ve anahtar hariç tutma |
 | Tanılama ve sürüm uyumluluğu | Ajan DNS/TLS/kimlik/ACK/kota kodları uygulandı; birleşik tanılama ekranı bekliyor | Core hata sınıflandırma, DB 1→2 geçmiş koruma, V1/V2 testleri |
-| Başlangıç oturum bilgisi ve saat sapması | Bekliyor | RDP, kullanıcı geçişi, saat ileri/geri testleri |
+| Başlangıç oturum bilgisi ve saat sapması | Olay oturum/açılış bağlamı uygulandı; başlangıç kilit bilgisi, servis ve saat sapması bekliyor | Yeniden açma, geçmiş bağlamı, RDP/gerçek Windows ve saat ileri/geri testleri |
 | Tespit eşik/istisna/tekrar yönetimi | Bekliyor | Etiketli normal ve anormal trafik ölçümü |
 | İmzalı kurulum ve geri alma | Bekliyor | İmza zinciri + Windows yükleme/kaldırma/upgrade |
 | Ana gezinme ve tek cihaz ayrıntısı | Bekliyor | Temel görevler, boş durum, klavye/DPI testleri |
@@ -43,3 +43,9 @@ Windows ajan çekirdeği aşaması: 98 Python testi + 13 C# çekirdek testi baş
 geçti. Gerçek C# → HTTPS → Python → SQLite testi, güvenilmeyen TLS'de kuyruk koruma
 ve güvenilen sertifikayla tekrar teslimi doğruladı. Testteki yerel koruyucu Windows
 DPAPI taklidi olarak başarı sayılmaz; gerçek Windows kabulü açık kalır.
+
+Oturum bağlamı aşaması: 101 Python testi, 15 C# testi; geçmiş olayın oturum/açılış
+bilgisini yeni bildirimden ayrı koruma, değişmiş bağlamla aynı kimliği reddetme,
+SQLite 1/2 → 3 ve kuyruk 1 → 2 geçişleri test edildi. Gerçek Tk testinde güncel
+#7 oturumu ile geçmiş #2 oturumu ayrı gösteriliyor. Bu servis için veri sözleşmesi
+hazırlığıdır; Windows servis hostu, görünür eşlikçi ve imzalı kurulum bitmiş değildir.

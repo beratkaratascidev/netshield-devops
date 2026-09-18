@@ -180,8 +180,30 @@ dotnet build agents/windows/Core/AgentCore.csproj
 .venv/bin/python scripts/test_agent_core_https.py --dotnet /path/to/dotnet
 ```
 
-13 ortak çekirdek testi geçiyor; test koruyucusu DPAPI değildir. Framework 4.7.2
+15 ortak çekirdek testi geçiyor; test koruyucusu DPAPI değildir. Framework 4.7.2
 hedefiyle derleme ve PowerShell parser kontrolü geçmiştir. Gerçek C# HttpClient ile
 Python HTTPS alıcısı testi güvenilmeyen TLS'de kuyruğun korunduğunu, güvenilen
 sertifikayla yeniden başlatmada teslim edildiğini doğrular. Windows işletim sistemi
 üzerindeki koruma/oturum/uyku/kapanış doğrulaması hâlâ zorunlu açık iştir.
+
+## Oturum bağlamı ve güncelleme sırası
+
+Olaylar gözlemci Windows oturum numarası ve olayın kaydedildiği açılış zamanı ile
+saklanır. Güncel bildirimin oturum numarası ayrıca gönderilir: yeni açılışta veya
+başka oturumda teslim edilen eski olayların bağlamı değiştirilmez. Panel son bildiren
+oturumu gösterir; tüm RDP/yerel oturumların ortak durumunu hesaplamaz. Eski olaylara
+sonradan oturum numarası atanmaz. Oturum numarası bir kişi kimliği değildir ve
+Windows tarafından tekrar kullanılabilir; kullanıcı adı/SID toplanmaz.
+
+Önce alıcı ve paneli, sonra ajanı güncelleyin. Yeni alanları tanımayan eski alıcı
+isteği reddeder; ajan onaysız kuyruğu silmez. Alıcı SQLite şema 1/2'yi 3'e yükseltir.
+Ajan korumalı durum dosyasını sürüm 1'den 2'ye yükseltir. Eski ajan sürüm 2 kuyruğu
+reddeder; bu dosyalar eski sürüme doğrudan geri verilmemelidir. Otomatik downgrade
+ve imzalı kurulum henüz uygulanmadı. Aynı cihaz anahtarını birden çok Windows
+kullanıcı ajanına dağıtmak desteklenen çoklu oturum kurulumu değildir; merkezi servis
+ve görünür oturum bileşeni hâlâ geliştirme işidir.
+
+Windows servisinde oturum olayının kendi SessionId bilgisi korunmalıdır;
+servis sürecinin Session 0 kimliği kullanıcı oturumu yerine yazılmamalıdır.
+Dayanaklar: [ServiceBase](https://learn.microsoft.com/en-us/dotnet/api/system.serviceprocess.servicebase),
+[oturum bildiriminin kapsamı](https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsregistersessionnotification).

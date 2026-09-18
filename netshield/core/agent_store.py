@@ -7,7 +7,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DISPLAY_EVENTS = 100
 MAX_EVENTS = 1000
 DEFAULT_RETENTION_DAYS = 30
@@ -44,7 +44,7 @@ def connection(path, readonly=False):
 
 
 def _version(conn, allow_legacy=False):
-    if conn.execute('PRAGMA user_version').fetchone()[0] not in ((1, SCHEMA_VERSION) if allow_legacy else (SCHEMA_VERSION,)):
+    if conn.execute('PRAGMA user_version').fetchone()[0] not in ((1, 2, SCHEMA_VERSION) if allow_legacy else (SCHEMA_VERSION,)):
         raise ValueError('Desteklenmeyen ajan veritabanı sürümü.')
 
 
@@ -63,7 +63,7 @@ class AgentStore:
             os.close(fd)
         with connection(self.path) as conn:
             version = conn.execute('PRAGMA user_version').fetchone()[0]
-            if version not in (0, 1, SCHEMA_VERSION):
+            if version not in (0, 1, 2, SCHEMA_VERSION):
                 raise ValueError('Desteklenmeyen ajan veritabanı sürümü.')
             conn.execute('PRAGMA journal_mode=WAL')
             conn.execute('PRAGMA secure_delete=ON')
@@ -78,7 +78,9 @@ class AgentStore:
                 conn.execute('''CREATE TABLE IF NOT EXISTS events (
                     position INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
                     event_id TEXT NOT NULL, kind TEXT NOT NULL, source_time TEXT NOT NULL,
-                    received_at REAL NOT NULL, UNIQUE(device_id, event_id))''')
+                    received_at REAL NOT NULL, details TEXT NOT NULL DEFAULT '{}', UNIQUE(device_id, event_id))''')
+                if 'details' not in {row[1] for row in conn.execute('PRAGMA table_info(events)')}:
+                    conn.execute("ALTER TABLE events ADD COLUMN details TEXT NOT NULL DEFAULT '{}'")
                 conn.execute('CREATE INDEX IF NOT EXISTS events_device_position ON events(device_id, position DESC)')
                 conn.execute('CREATE INDEX IF NOT EXISTS events_received ON events(received_at)')
                 if not conn.execute("SELECT 1 FROM metadata WHERE key='legacy_imported'").fetchone():
@@ -98,19 +100,20 @@ class AgentStore:
 
     @staticmethod
     def _put(conn, identity, data, received_at):
-        extra = {key: data[key] for key in ('agent_state', 'dropped_events', 'pending_events') if key in data}
+        extra = {key: data[key] for key in ('agent_state', 'dropped_events', 'pending_events', 'session_id') if key in data}
         conn.execute('''INSERT INTO devices (id, boot_time, session, received_at, details) VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET boot_time=excluded.boot_time,
             session=excluded.session, received_at=excluded.received_at, details=excluded.details''',
                      (identity, data['boot_time'], data['session'], received_at, json.dumps(extra)))
         for event in data['events']:
-            previous = conn.execute('SELECT kind, source_time FROM events WHERE device_id=? AND event_id=?',
+            context = {key: event[key] for key in ('session_id', 'boot_time') if key in event}
+            previous = conn.execute('SELECT kind, source_time, details FROM events WHERE device_id=? AND event_id=?',
                                     (identity, event['id'])).fetchone()
-            if previous and tuple(previous) != (event['kind'], event['time']):
+            if previous and (previous['kind'], previous['source_time'], json.loads(previous['details'])) != (event['kind'], event['time'], context):
                 raise ValueError('Aynı olay kimliği farklı içerikle kullanılamaz.')
             conn.execute('''INSERT OR IGNORE INTO events
-                (device_id,event_id,kind,source_time,received_at) VALUES (?,?,?,?,?)''',
-                         (identity, event['id'], event['kind'], event['time'], received_at))
+                (device_id,event_id,kind,source_time,received_at,details) VALUES (?,?,?,?,?,?)''',
+                         (identity, event['id'], event['kind'], event['time'], received_at, json.dumps(context)))
         conn.execute('''DELETE FROM events WHERE device_id=? AND position NOT IN (
             SELECT position FROM events WHERE device_id=? ORDER BY position DESC LIMIT ?)''',
                      (identity, identity, MAX_EVENTS))
@@ -165,14 +168,21 @@ def read_database(settings_path):
             if len(rows) > 500:
                 raise ValueError('Ajan cihaz sınırı aşıldı.')
             result = {}
+            event_details = 'details' in {row[1] for row in conn.execute('PRAGMA table_info(events)')}
             for row in rows:
-                events = conn.execute('''SELECT event_id, kind, source_time FROM events
+                events = conn.execute(f'''SELECT event_id, kind, source_time, {"details" if event_details else "'{}'"} AS details FROM events
                     WHERE device_id=? ORDER BY position DESC LIMIT ?''', (row['id'], DISPLAY_EVENTS)).fetchall()
                 extra = json.loads(row['details']) if 'details' in row.keys() else {}
-                if not isinstance(extra, dict) or set(extra) - {'agent_state', 'dropped_events', 'pending_events'}:
+                if not isinstance(extra, dict) or set(extra) - {'agent_state', 'dropped_events', 'pending_events', 'session_id'}:
                     raise ValueError('Invalid stored agent diagnostics')
+                history = []
+                for event in reversed(events):
+                    context = json.loads(event['details'])
+                    if not isinstance(context, dict) or set(context) not in (set(), {'session_id', 'boot_time'}):
+                        raise ValueError('Invalid stored event context')
+                    history.append(dict(id=event['event_id'], kind=event['kind'], time=event['source_time'], **context))
                 result[row['id']] = dict(boot_time=row['boot_time'], session=row['session'], received_at=row['received_at'],
-                    events=[dict(id=e['event_id'], kind=e['kind'], time=e['source_time']) for e in reversed(events)], **extra)
+                    events=history, **extra)
             conn.commit()
             return result
         except BaseException:

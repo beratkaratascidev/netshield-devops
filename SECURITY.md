@@ -164,8 +164,12 @@ reddiyle yapılır. V2 teslim onayındaki kimlikler gönderilen küme ile eşle�
 kuyruk temizlenmez. Sunucuya isteğe bağlı `agent_state`, `pending_events` ve
 `dropped_events` gönderilir. `agent_state` eski kuyruk olaylarından ayrıdır; önceki
 oturumun durdurma olayını göndermek çalışan ajanı durmuş olarak göstermez.
-SQLite şeması 1 → 2, geçmiş korunarak işlem içinde yükseltilir. Eski V1 istemciler
-ve salt okunur şema 1 panel okuması desteklenir.
+SQLite şeması 1/2 → 3, geçmiş korunarak işlem içinde yükseltilir. Eski V1 istemciler
+ve salt okunur şema 1/2 panel okuması desteklenir. Yeni olaylar `session_id` ve
+olayın `boot_time` bağlamını taşır; güncel bildirim gözlemci `session_id` alanını
+ayrıca taşır. Bu değerler kişi kimliği veya tüm oturumların durumunun kanıtı değildir.
+Eski olaylara yeni oturum bağlamı eklenmez. Ajan disk biçimi 1 → 2 yükseltilir;
+eski ajan yeni biçimi reddeder. Önce alıcı/panel sonra ajan güncellenmelidir.
 
 Bu aşamada Windows servisi/otomatik başlatma uygulanmış sayılmaz. Ortak çekirdek
 Linux'ta, Framework hedefi derlenerek ve gerçek HTTPS entegrasyonuyla doğrulandı;

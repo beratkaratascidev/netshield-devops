@@ -202,6 +202,16 @@ class WorkspaceTests(unittest.TestCase):
         a._show_agent_details()
         self.assertIn('Cihaz kimliği: windows1', a._agent_details.get('1.0', 'end'))
         self.assertIn('Oturum kilitlendi', a._agent_details.get('1.0', 'end'))
+        self.assertIn('oturum bağlamı kaydedilmemiş', a._agent_details.get('1.0', 'end'))
+        record['session_id'] = 7
+        record['events'][0].update(session_id=2, boot_time='2026-09-16T08:00:00+00:00')
+        path.write_text(json.dumps({'windows1': record}))
+        a._refresh_agent_panel()
+        self.wait_agent_refresh()
+        self.assertEqual(a._agent_tree.set('windows1', 'state'), 'Bağlı · kilitli · oturum #7')
+        detail = a._agent_details.get('1.0', 'end')
+        self.assertIn('Son bildiren Windows oturumu: #7', detail)
+        self.assertIn('gözlemci oturum #2 · açılış 2026-09-16', detail)
         record['received_at'] -= 100
         path.write_text(json.dumps({'windows1': record}))
         a._refresh_agent_panel()

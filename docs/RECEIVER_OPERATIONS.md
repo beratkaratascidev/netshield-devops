@@ -102,3 +102,16 @@ olarak göstermez. Bu alanlar SQLite şema 2'de saklanır; alıcı şema 1'i iş
 yükseltir ve geçmişi korur. Şema 2 DB eski alıcıya doğrudan düşürülmemelidir.
 Panel güncellemesi şema 1'i salt okunur açabilir. 1→2 geçişi yedek/geri alma tasarımının
 tek başına tamamlandığı anlamına gelmez; kontrollü yedek/geri yükleme hâlâ ayrı iştir.
+
+## Oturum bağlamı (şema 3)
+
+İsteğe bağlı üst düzey `session_id`, son bildiren Windows oturumudur. Yeni olaylar
+`session_id` ve `boot_time` alanlarını birlikte taşır; alan çifti eksikse istek
+reddedilir. Sayısal oturum kimliği 0–2147483647 aralığında bir tamsayı olmalıdır.
+Aynı olay kimliğiyle değiştirilmiş oturum/açılış bilgisi tüm yazımı geri aldırır.
+Geçmiş bağlamı güncel bildirimin değerleriyle doldurulmaz.
+
+Güncel alıcı şema 1/2'yi işlem içinde 3'e yükseltir; salt okunur panel eski şemaları
+da okuyabilir. Geçmiş ve kuyruk tanılaması korunur. Yeni ajan eski alıcıya yeni alanlar
+ile bildirim gönderirse reddedilir; önce alıcı/panel güncellenmelidir. Şema 3 dosyası
+eski alıcıyla açılmamalıdır. Gerçek çoklu oturum servis kurulumu henüz desteklenmez.

@@ -65,6 +65,38 @@ class StoreTests(unittest.TestCase):
                 store.accept('pc', status(), {'pc'})
         self.assertEqual(read_database(self.settings), {})
 
+    def test_session_context_survives_restart_retry_and_conflict_rollback(self):
+        store = AgentStore(self.settings)
+        data = dict(status(), session_id=7)
+        data['events'][0].update(session_id=2, boot_time='2026-09-16T08:00:00Z')
+        store.accept('pc', data, {'pc'}, received_at=1000)
+        store = AgentStore(self.settings)
+        store.accept('pc', data, {'pc'}, received_at=1001)
+        before, error = read_snapshot(self.settings)
+        self.assertIsNone(error)
+        self.assertEqual(before['pc']['session_id'], 7)
+        event = before['pc']['events'][0]
+        self.assertEqual(event['session_id'], 2)
+        self.assertEqual(event['boot_time'], '2026-09-16T08:00:00+00:00')
+        for change in ({'session_id': 7}, {'boot_time': '2026-09-17T08:00:00Z'}):
+            changed = dict(data, events=[dict(data['events'][0], **change)])
+            with self.assertRaises(ValueError):
+                store.accept('pc', changed, {'pc'}, received_at=1002)
+            self.assertEqual(read_database(self.settings), before)
+
+    def test_schema_two_read_and_migration_preserve_diagnostics_and_history(self):
+        store = AgentStore(self.settings)
+        store.accept('pc', dict(status(), agent_state='running', pending_events=1), {'pc'})
+        before = read_database(self.settings)
+        with connection(store.path) as conn:
+            conn.execute('ALTER TABLE events DROP COLUMN details')
+            conn.execute('PRAGMA user_version=2')
+        self.assertEqual(read_database(self.settings), before)
+        AgentStore(self.settings)
+        self.assertEqual(read_database(self.settings), before)
+        with connection(store.path) as conn:
+            self.assertEqual(conn.execute('PRAGMA user_version').fetchone()[0], 3)
+
     def test_retention_uses_receive_time_and_removes_deleted_devices(self):
         store = AgentStore(self.settings, retention_days=1)
         store.accept('pc', status(), {'pc', 'other'}, received_at=1000)

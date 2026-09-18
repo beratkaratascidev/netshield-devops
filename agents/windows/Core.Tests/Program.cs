@@ -32,8 +32,9 @@ class Program {
             Configuration imported=Json.Decode<Configuration>(File.ReadAllBytes(args[0]));
             using(var q=new DurableQueue(args[1],new TestProtector(),imported))
             using(var transport=new Transport()) {
-                q.Enqueue("agent_started",DateTimeOffset.UtcNow);
-                var result=transport.SendAsync(q,q.Batch(DateTimeOffset.UtcNow.ToString("o"),"unknown","running"),CancellationToken.None).GetAwaiter().GetResult();
+                string boot=DateTimeOffset.UtcNow.ToString("o");
+                q.Enqueue("agent_started",DateTimeOffset.UtcNow,3,boot);
+                var result=transport.SendAsync(q,q.Batch(boot,"unknown","running",3),CancellationToken.None).GetAwaiter().GetResult();
                 Console.WriteLine("RESULT "+result.Code+" pending="+q.Count);
                 Environment.ExitCode=result.Success ? 0 : 2;
             }
@@ -171,6 +172,33 @@ class Program {
             string unrelated=path+".notes.tmp"; File.WriteAllText(unrelated,"keep");
             using(var q=new DurableQueue(path,new TestProtector(),null)) Assert(q.Count==1,"primary queue lost");
             Assert(!File.Exists(abandoned) && File.Exists(unrelated),"incorrect orphan cleanup");
+        });
+        Test("old session and boot context survive restart and a new observer",path => {
+            string oldBoot=DateTimeOffset.UtcNow.AddDays(-1).ToString("o");
+            using(var q=new DurableQueue(path,new TestProtector(),Config())) {
+                q.Enqueue("session_lock",DateTimeOffset.UtcNow,2,oldBoot);
+            }
+            using(var q=new DurableQueue(path,new TestProtector(),null)) {
+                var batch=q.Batch(DateTimeOffset.UtcNow.ToString("o"),"unknown","running",7);
+                Assert(batch.SessionId==7 && batch.Events[0].SessionId==2 && batch.Events[0].BootTime==oldBoot,"history relabeled as current session");
+                var wire=Json.Decode<StatusMessage>(Json.Encode(batch));
+                Assert(wire.SessionId==7 && wire.Events[0].SessionId==2,"wire lost session context");
+                try { q.Enqueue("session_lock",DateTimeOffset.UtcNow,-1,oldBoot); throw new Exception("negative ID accepted"); } catch(InvalidDataException) { }
+                try { q.Enqueue("session_lock",DateTimeOffset.UtcNow,1,null); throw new Exception("incomplete context accepted"); } catch(InvalidDataException) { }
+                try { q.Enqueue("session_lock",DateTimeOffset.UtcNow,1,"2026-09-18T08:00:00"); throw new Exception("timezone missing"); } catch(InvalidDataException) { }
+                Assert(q.Count==1,"invalid context changed queue");
+            }
+        });
+        Test("legacy queue upgrade preserves IDs without inventing session context",path => {
+            var protector=new TestProtector();
+            var state=new State {Version=1,Configuration=Config()};
+            state.Pending.Add(new AgentEvent {Id=new string('b',32),Kind="agent_started",Time=DateTimeOffset.UtcNow.ToString("o")});
+            File.WriteAllBytes(path,protector.Protect(Json.Encode(state)));
+            using(var q=new DurableQueue(path,protector,null)) {
+                var entry=q.Batch("boot","unknown","running",7).Events[0];
+                Assert(entry.Id==new string('b',32) && entry.SessionId==null && entry.BootTime==null,"legacy context fabricated");
+            }
+            Assert(Json.Decode<State>(protector.Unprotect(File.ReadAllBytes(path))).Version==2,"upgrade not persisted");
         });
         Console.WriteLine(passed+" shared-core tests passed. Windows DPAPI and UI require Windows validation.");
     }

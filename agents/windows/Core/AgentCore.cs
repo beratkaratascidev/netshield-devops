@@ -71,9 +71,19 @@ namespace NetShield.Agent {
         [DataMember(Name="id")] public string Id;
         [DataMember(Name="kind")] public string Kind;
         [DataMember(Name="time")] public string Time;
+        [DataMember(Name="session_id", EmitDefaultValue=false)] public int? SessionId;
+        [DataMember(Name="boot_time", EmitDefaultValue=false)] public string BootTime;
+        public void ValidateContext() {
+            DateTimeOffset parsed;
+            if (SessionId.HasValue != (BootTime != null) || SessionId < 0 ||
+                (BootTime != null && (BootTime.Length > 40 ||
+                    !Regex.IsMatch(BootTime, @"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?(?:Z|[+-]\d{2}:\d{2})\z") ||
+                    !DateTimeOffset.TryParse(BootTime, out parsed))))
+                throw new InvalidDataException("Invalid event session context.");
+        }
     }
     [DataContract] public sealed class State {
-        [DataMember] public int Version = 1;
+        [DataMember] public int Version = 2;
         [DataMember] public Configuration Configuration;
         [DataMember] public List<AgentEvent> Pending = new List<AgentEvent>();
         [DataMember] public long Dropped;
@@ -85,6 +95,7 @@ namespace NetShield.Agent {
         [DataMember(Name="agent_state")] public string AgentState;
         [DataMember(Name="dropped_events")] public long Dropped;
         [DataMember(Name="pending_events")] public int Pending;
+        [DataMember(Name="session_id", EmitDefaultValue=false)] public int? SessionId;
     }
     [DataContract] public sealed class Acknowledgment {
         [DataMember(Name="code")] public string Code;
@@ -108,7 +119,7 @@ namespace NetShield.Agent {
                 if (File.Exists(this.path)) {
                     if (new FileInfo(this.path).Length > 1024*1024) throw new InvalidDataException("Agent state exceeds limit.");
                     state = Json.Decode<State>(protector.Unprotect(File.ReadAllBytes(this.path)));
-                    if (state == null || state.Version != 1 || state.Configuration == null || state.Pending == null || state.Pending.Count > Capacity || state.Dropped < 0)
+                    if (state == null || (state.Version != 1 && state.Version != 2) || state.Configuration == null || state.Pending == null || state.Pending.Count > Capacity || state.Dropped < 0)
                         throw new InvalidDataException("Invalid agent state; recovery is required.");
                     state.Configuration.Validate();
                     HashSet<string> ids = new HashSet<string>();
@@ -116,7 +127,9 @@ namespace NetShield.Agent {
                         DateTimeOffset parsed;
                         if (entry == null || entry.Id == null || !Regex.IsMatch(entry.Id, @"\A[0-9a-f]{32}\z") || !ids.Add(entry.Id) ||
                             !Kinds.Contains(entry.Kind) || !DateTimeOffset.TryParse(entry.Time, out parsed)) throw new InvalidDataException("Invalid queued event.");
+                        entry.ValidateContext();
                     }
+                    if (state.Version == 1) { State upgraded=Copy(); upgraded.Version=2; Save(upgraded); state=upgraded; }
                     if (configuration != null) {
                         configuration.Validate();
                         if (state.Configuration.DeviceId != configuration.DeviceId || state.Configuration.Server != configuration.Server)
@@ -152,13 +165,18 @@ namespace NetShield.Agent {
         public int Count { get { lock(gate) { return state.Pending.Count; } } }
         public long Dropped { get { lock(gate) { return state.Dropped; } } }
         public string Enqueue(string kind, DateTimeOffset when) {
+            return Enqueue(kind, when, null, null);
+        }
+        public string Enqueue(string kind, DateTimeOffset when, int? sessionId, string bootTime) {
             if (!Kinds.Contains(kind)) throw new ArgumentException("Unknown event kind");
+            AgentEvent entry = new AgentEvent { Id=Guid.NewGuid().ToString("N"), Kind=kind,
+                Time=when.ToUniversalTime().ToString("o"), SessionId=sessionId, BootTime=bootTime };
+            entry.ValidateContext();
             lock(gate) {
                 State candidate = Copy();
                 if (candidate.Pending.Count == Capacity) { candidate.Pending.RemoveAt(0); candidate.Dropped++; }
-                string id = Guid.NewGuid().ToString("N");
-                candidate.Pending.Add(new AgentEvent { Id=id, Kind=kind, Time=when.ToUniversalTime().ToString("o") });
-                Save(candidate); state=candidate; return id;
+                candidate.Pending.Add(entry);
+                Save(candidate); state=candidate; return entry.Id;
             }
         }
         public void Prune(DateTimeOffset now) {
@@ -169,9 +187,13 @@ namespace NetShield.Agent {
             }
         }
         public StatusMessage Batch(string bootTime, string session, string agentState) {
+            return Batch(bootTime, session, agentState, null);
+        }
+        public StatusMessage Batch(string bootTime, string session, string agentState, int? sessionId) {
+            if (sessionId < 0) throw new ArgumentException("Invalid session ID");
             Prune(DateTimeOffset.UtcNow);
             lock(gate) { return new StatusMessage { BootTime=bootTime, Session=session, AgentState=agentState,
-                Events=Copy().Pending.Take(100).ToList(), Dropped=state.Dropped, Pending=state.Pending.Count }; }
+                Events=Copy().Pending.Take(100).ToList(), Dropped=state.Dropped, Pending=state.Pending.Count, SessionId=sessionId }; }
         }
         public void Acknowledge(StatusMessage sent, Acknowledgment ack) {
             HashSet<string> expected = new HashSet<string>(sent.Events.Select(e => e.Id));
@@ -250,8 +272,11 @@ namespace NetShield.Agent {
         public AgentRuntime(DurableQueue queue, Transport transport) { this.queue=queue; this.transport=transport; }
         public bool Busy { get { return pending != null; } }
         public bool BeginSend(string bootTime, string session, string agentState) {
+            return BeginSend(bootTime, session, agentState, null);
+        }
+        public bool BeginSend(string bootTime, string session, string agentState, int? sessionId) {
             if (pending != null || stop.IsCancellationRequested) return false;
-            pending=Task.Run(async delegate { return await transport.SendAsync(queue, queue.Batch(bootTime, session, agentState), stop.Token).ConfigureAwait(false); });
+            pending=Task.Run(async delegate { return await transport.SendAsync(queue, queue.Batch(bootTime, session, agentState, sessionId), stop.Token).ConfigureAwait(false); });
             return true;
         }
         public SendResult Poll() {

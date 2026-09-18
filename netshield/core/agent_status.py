@@ -11,6 +11,12 @@ from pathlib import Path
 EVENTS = {'agent_started', 'agent_stopped', 'session_lock', 'session_unlock', 'suspend', 'resume', 'session_logoff'}
 
 
+def session_id(value):
+    if type(value) is not int or not 0 <= value <= 2147483647:
+        raise ValueError('Invalid Windows session ID')
+    return value
+
+
 def timestamp(value):
     if not isinstance(value, str) or len(value) > 40:
         raise ValueError('Invalid timestamp')
@@ -22,7 +28,7 @@ def timestamp(value):
 
 def validate_status(data):
     required = {'boot_time', 'session', 'events'}
-    optional = {'agent_state', 'dropped_events', 'pending_events'}
+    optional = {'agent_state', 'dropped_events', 'pending_events', 'session_id'}
     if not isinstance(data, dict) or not required <= set(data) or set(data) - required - optional:
         raise ValueError('Invalid status fields')
     if data['session'] not in ('unknown', 'locked', 'unlocked'):
@@ -31,14 +37,19 @@ def validate_status(data):
         raise ValueError('Too many events')
     events = []
     for event in data['events']:
-        if not isinstance(event, dict) or set(event) != {'id', 'kind', 'time'}:
+        if not isinstance(event, dict) or set(event) not in ({'id', 'kind', 'time'}, {'id', 'kind', 'time', 'session_id', 'boot_time'}):
             raise ValueError('Invalid event')
         if not isinstance(event['id'], str) or len(event['id']) != 32 or any(c not in '0123456789abcdef' for c in event['id']):
             raise ValueError('Invalid event ID')
         if event['kind'] not in EVENTS:
             raise ValueError('Invalid event kind')
-        events.append(dict(id=event['id'], kind=event['kind'], time=timestamp(event['time'])))
+        normalized = dict(id=event['id'], kind=event['kind'], time=timestamp(event['time']))
+        if 'session_id' in event:
+            normalized.update(session_id=session_id(event['session_id']), boot_time=timestamp(event['boot_time']))
+        events.append(normalized)
     extra = {k: data[k] for k in optional if k in data}
+    if 'session_id' in extra:
+        session_id(extra['session_id'])
     if 'agent_state' in extra and extra['agent_state'] not in ('running', 'stopped'):
         raise ValueError('Invalid agent state')
     for key in ('dropped_events', 'pending_events'):
@@ -100,4 +111,7 @@ def status_label(record, now=None):
         return 'Bağlantı kesildi / kapanış bilinmiyor'
     if record.get('agent_state') == 'stopped' or ('agent_state' not in record and record['events'] and record['events'][-1]['kind'] == 'agent_stopped'):
         return 'Ajan durduruldu'
-    return {'locked': 'Bağlı · kilitli', 'unlocked': 'Bağlı · kilit açık', 'unknown': 'Bağlı · oturum bilinmiyor'}[record['session']]
+    label = {'locked': 'Bağlı · kilitli', 'unlocked': 'Bağlı · kilit açık', 'unknown': 'Bağlı · oturum bilinmiyor'}[record['session']]
+    if 'session_id' in record:
+        label += f" · oturum #{record['session_id']}"
+    return label

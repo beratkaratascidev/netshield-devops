@@ -46,6 +46,25 @@ class AgentTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_status(dict(payload(), **changes))
 
+    def test_session_context_is_optional_strict_and_scoped_in_label(self):
+        data = payload()
+        data['session_id'] = 3
+        data['events'][0].update(session_id=1, boot_time='2026-09-16T08:00:00Z')
+        normalized = validate_status(data)
+        self.assertEqual(normalized['events'][0]['session_id'], 1)
+        self.assertIn('oturum #3', status_label(dict(normalized, received_at=100), now=100))
+        for bad in (True, -1, 2147483648, '1', None):
+            with self.subTest(value=bad), self.assertRaises(ValueError):
+                validate_status(dict(data, session_id=bad))
+            changed = dict(data['events'][0], session_id=bad)
+            with self.assertRaises(ValueError):
+                validate_status(dict(data, events=[changed]))
+        for key in ('session_id', 'boot_time'):
+            incomplete = dict(data['events'][0])
+            del incomplete[key]
+            with self.assertRaises(ValueError):
+                validate_status(dict(data, events=[incomplete]))
+
     def test_deduplication_rate_limit_persistence_and_disconnect(self):
         with patch('netshield.agent_receiver.time.monotonic', return_value=100):
             self.assertTrue(self.receiver.accept('pc1', 'secret', payload()))

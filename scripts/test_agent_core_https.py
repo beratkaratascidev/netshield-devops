@@ -61,6 +61,8 @@ async def main():
             records, error = read_snapshot(settings)
             assert error is None and len(records['pc1']['events']) == 2
             assert records['pc1']['agent_state'] == 'running'
+            assert records['pc1']['session_id'] == 3
+            assert all(e['session_id'] == 3 and e['boot_time'] for e in records['pc1']['events'])
             assert 'Bağlı' in status_label(records['pc1'])
             print('PASS real C# -> HTTPS -> Python -> SQLite -> dashboard snapshot; untrusted TLS preserved queue, trusted retry delivered both events')
         finally:

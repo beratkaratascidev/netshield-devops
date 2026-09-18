@@ -43,6 +43,7 @@ $configuration = $script:queue.Configuration
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $script:bootTime = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')
 $script:sessionState = 'unknown'
+$script:sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
 $script:clock = [Diagnostics.Stopwatch]::StartNew()
 $script:nextSend = 0
 $script:failures = 0
@@ -52,7 +53,7 @@ $script:closeDeadline = 0
 $script:finalSendStarted = $false
 $script:runtime = [NetShield.Agent.AgentRuntime]::new($script:queue, (New-Object NetShield.Agent.Transport))
 function Add-StatusEvent([string]$kind, [DateTime]$when = [DateTime]::UtcNow) {
-    [void]$script:queue.Enqueue($kind, [DateTimeOffset]$when.ToUniversalTime())
+    [void]$script:queue.Enqueue($kind, [DateTimeOffset]$when.ToUniversalTime(), $script:sessionId, $script:bootTime)
 }
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'NetShield - Cihaz durum ajani'
@@ -61,7 +62,7 @@ $form.StartPosition = 'CenterScreen'
 $notice = New-Object System.Windows.Forms.Label
 $notice.Location = New-Object System.Drawing.Point(20, 20)
 $notice.Size = New-Object System.Drawing.Size(570, 125)
-$notice.Text = "Bu ajan acilis zamanini, kilit/uyku olaylarini ve baglanti durumunu bildirir.`r`nHedef: $($configuration.Server)`r`nCihaz: $($configuration.DeviceId)`r`nEkran, tuslar, dosyalar veya kullanilan uygulamalar toplanmaz.`r`nPencereyi kapatmak veri gonderimini durdurur."
+$notice.Text = "Bu ajan acilis zamanini, kilit/uyku olaylarini ve baglanti durumunu bildirir.`r`nHedef: $($configuration.Server)`r`nCihaz: $($configuration.DeviceId) | Gozlemci oturum: $script:sessionId`r`nEkran, tuslar, dosyalar veya kullanilan uygulamalar toplanmaz.`r`nPencereyi kapatmak veri gonderimini durdurur."
 $form.Controls.Add($notice)
 $script:statusLabel = New-Object System.Windows.Forms.Label
 $script:statusLabel.Location = New-Object System.Drawing.Point(20, 155)
@@ -129,14 +130,14 @@ $timer.Add_Tick({
     if ($script:closing) {
         if (-not $script:runtime.Busy -and -not $script:finalSendStarted) {
             $script:finalSendStarted = $true
-            [void]$script:runtime.BeginSend($script:bootTime, $script:sessionState, 'stopped')
+            [void]$script:runtime.BeginSend($script:bootTime, $script:sessionState, 'stopped', $script:sessionId)
         }
         if ($script:clock.ElapsedMilliseconds -ge $script:closeDeadline -or ($script:finalSendStarted -and -not $script:runtime.Busy)) {
             $script:allowClose = $true
             $form.Close()
         }
     } elseif (-not $script:runtime.Busy -and $script:clock.ElapsedMilliseconds -ge $script:nextSend) {
-        [void]$script:runtime.BeginSend($script:bootTime, $script:sessionState, 'running')
+        [void]$script:runtime.BeginSend($script:bootTime, $script:sessionState, 'running', $script:sessionId)
     }
 })
 $form.Add_FormClosing({
