@@ -145,4 +145,29 @@ olmayan bir yapılandırma kalabilir; yeni bir dosyaya yeniden eşleştirme yap�
 Pencere anahtarı göstermez ve ağ isteği yapmaz. Bildirim kontrolü yerel alıcı kaydını
 okur; sertifika/DNS tanılaması yapıldığı veya yeni anahtarın uzak Windows üzerinde
 kullanıldığı tek başına kanıtlanmaz. Anahtar hâlâ Windows'a taşınacak JSON dosyasında
-açık metindir; korumalı Windows anahtar deposu işi henüz tamamlanmadı.
+açık metindir. Ajan içe aktardıktan sonra yerel çalışma kopyası CurrentUser DPAPI
+ile korunur; ilk JSON otomatik silinmez. Windows üzerindeki DPAPI doğrulaması henüz
+gerçekleştirilmedi.
+
+### Windows kalıcı kuyruk ve arka plan göndericisi
+
+Windows ajanının C# bileşeni anahtar ve olay kuyruğunu kullanıcıya bağlı DPAPI ile
+korur. Dizin ACL'si kullanıcıya sınırlanır; tek süreç kilidi çift ajan erişimini
+engeller. Dosya geçici şifreli kopya, flush ve atomik değiştirmeyle yazılır; hata
+olursa bellekteki durum eski kalır. Bozuk veri sessiz silinmez. Kuyruk 1.000 olay ve
+7 günle sınırlıdır; kayıp sayacı saklanır ve bildirilir. İlk yapılandırma JSON'u,
+anahtarın bellekteki kopyası, aynı hesaptaki süreçler veya OS yöneticisi bu dosya
+korumasıyla tamamen korunmuş sayılmaz. Aynı hesabı paylaşan kişiler ayrılmaz.
+
+Gönderim HttpClient üzerinden ayrı işçide, sertifika/ad doğrulaması ve yönlendirme
+reddiyle yapılır. V2 teslim onayındaki kimlikler gönderilen küme ile eşleşmeden
+kuyruk temizlenmez. Sunucuya isteğe bağlı `agent_state`, `pending_events` ve
+`dropped_events` gönderilir. `agent_state` eski kuyruk olaylarından ayrıdır; önceki
+oturumun durdurma olayını göndermek çalışan ajanı durmuş olarak göstermez.
+SQLite şeması 1 → 2, geçmiş korunarak işlem içinde yükseltilir. Eski V1 istemciler
+ve salt okunur şema 1 panel okuması desteklenir.
+
+Bu aşamada Windows servisi/otomatik başlatma uygulanmış sayılmaz. Ortak çekirdek
+Linux'ta, Framework hedefi derlenerek ve gerçek HTTPS entegrasyonuyla doğrulandı;
+Windows DPAPI/NTFS ve etkileşimli oturum testleri için `agents/windows/Test-Agent.ps1`
+ve ajan rehberindeki kabul adımları kullanılmalıdır.

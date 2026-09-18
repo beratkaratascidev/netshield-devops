@@ -99,3 +99,16 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(read_snapshot(self.settings)[0], {})
         with self.assertRaises(sqlite3.DatabaseError):
             Receiver(self.settings)
+
+    def test_backlogged_stop_does_not_mark_running_agent_stopped(self):
+        data = payload()
+        data['events'][0]['kind'] = 'agent_stopped'
+        data.update(agent_state='running', dropped_events=3, pending_events=40)
+        self.receiver.accept('pc1', 'secret', data)
+        record = read_snapshot(self.settings)[0]['pc1']
+        self.assertIn('Bağlı', status_label(record, record['received_at']))
+        record['agent_state'] = 'stopped'
+        self.assertEqual(status_label(record, record['received_at']), 'Ajan durduruldu')
+        for key, value in [('pending_events', -1), ('dropped_events', True), ('agent_state', 'invented')]:
+            with self.assertRaises(ValueError):
+                validate_status(dict(data, **{key: value}))

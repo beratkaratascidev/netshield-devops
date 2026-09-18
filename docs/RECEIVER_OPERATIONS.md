@@ -92,3 +92,13 @@ kapsar. Ölçülen CPU/RAM aynı süreçteki istemci ve sunucunun toplamıdır.
 Ayrıntılı çıktı: `receiver-load-results.json`. Bu kısa yük testi gerçek Windows
 ajanını, gerçek LAN/VPN gecikmesini, uzun süre çalışmayı veya tüm DoS koşullarını
 kanıtlamaz. Bunlar IMPLEMENTATION_STATUS.md içinde açık işlerdir.
+
+## Windows ajanı V2 tanılama alanları
+
+Yeni ajan isteğe bağlı `agent_state` (`running`/`stopped`), `pending_events` ve
+`dropped_events` alanlarını gönderir. Kuyruk sayıları bildirim hazırlanma anındandır.
+Geçmişteki `agent_stopped` olayı, `agent_state=running` olan güncel istemciyi durdu
+olarak göstermez. Bu alanlar SQLite şema 2'de saklanır; alıcı şema 1'i işlem içinde
+yükseltir ve geçmişi korur. Şema 2 DB eski alıcıya doğrudan düşürülmemelidir.
+Panel güncellemesi şema 1'i salt okunur açabilir. 1→2 geçişi yedek/geri alma tasarımının
+tek başına tamamlandığı anlamına gelmez; kontrollü yedek/geri yükleme hâlâ ayrı iştir.

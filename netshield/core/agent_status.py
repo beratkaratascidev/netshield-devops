@@ -21,7 +21,9 @@ def timestamp(value):
 
 
 def validate_status(data):
-    if not isinstance(data, dict) or set(data) != {'boot_time', 'session', 'events'}:
+    required = {'boot_time', 'session', 'events'}
+    optional = {'agent_state', 'dropped_events', 'pending_events'}
+    if not isinstance(data, dict) or not required <= set(data) or set(data) - required - optional:
         raise ValueError('Invalid status fields')
     if data['session'] not in ('unknown', 'locked', 'unlocked'):
         raise ValueError('Invalid session')
@@ -36,7 +38,13 @@ def validate_status(data):
         if event['kind'] not in EVENTS:
             raise ValueError('Invalid event kind')
         events.append(dict(id=event['id'], kind=event['kind'], time=timestamp(event['time'])))
-    return dict(boot_time=timestamp(data['boot_time']), session=data['session'], events=events)
+    extra = {k: data[k] for k in optional if k in data}
+    if 'agent_state' in extra and extra['agent_state'] not in ('running', 'stopped'):
+        raise ValueError('Invalid agent state')
+    for key in ('dropped_events', 'pending_events'):
+        if key in extra and (type(extra[key]) is not int or not 0 <= extra[key] <= 9007199254740991):
+            raise ValueError('Invalid queue counter')
+    return dict(boot_time=timestamp(data['boot_time']), session=data['session'], events=events, **extra)
 
 
 def read_legacy_snapshot(settings_path):
@@ -59,7 +67,7 @@ def read_legacy_snapshot(settings_path):
             seen = record['received_at']
             if type(seen) not in (int, float) or not math.isfinite(seen) or not 0 <= seen <= 253402214400:
                 raise ValueError('Invalid receive time')
-            validate_status({k: record[k] for k in ('boot_time', 'session', 'events')})
+            validate_status({k: v for k, v in record.items() if k != 'received_at'})
         return data, None
     except FileNotFoundError:
         return {}, None
@@ -75,7 +83,7 @@ def read_snapshot(settings_path):
     try:
         records = read_database(settings_path)
         for record in records.values():
-            validate_status({k: record[k] for k in ('boot_time', 'session', 'events')})
+            validate_status({k: v for k, v in record.items() if k != 'received_at'})
             seen = record['received_at']
             if type(seen) not in (int, float) or not math.isfinite(seen) or not 0 <= seen <= 253402214400:
                 raise ValueError('Invalid receive time')
@@ -90,6 +98,6 @@ def status_label(record, now=None):
     age = (time.time() if now is None else now) - record['received_at']
     if age < 0 or age > 90:
         return 'Bağlantı kesildi / kapanış bilinmiyor'
-    if record['events'] and record['events'][-1]['kind'] == 'agent_stopped':
+    if record.get('agent_state') == 'stopped' or ('agent_state' not in record and record['events'] and record['events'][-1]['kind'] == 'agent_stopped'):
         return 'Ajan durduruldu'
     return {'locked': 'Bağlı · kilitli', 'unlocked': 'Bağlı · kilit açık', 'unknown': 'Bağlı · oturum bilinmiyor'}[record['session']]

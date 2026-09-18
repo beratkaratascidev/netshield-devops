@@ -234,6 +234,8 @@ class InventoryPanel:
             labels = dict(agent_started='Ajan başladı', agent_stopped='Ajan durduruldu (PC kapanışı değildir)',
                           session_lock='Oturum kilitlendi', session_unlock='Oturum kilidi açıldı',
                           session_logoff='Oturum kapatma bildirimi', suspend='Uyku bildirimi', resume='Uyanma bildirimi')
+            if record and ('pending_events' in record or 'dropped_events' in record):
+                text += f"Ajan kuyruğu (bildirim anı): {record.get('pending_events', 0)} · Kota/saklama nedeniyle düşen olay: {record.get('dropped_events', 0)}\n"
             text += '\n'.join(f"{event['time']} · {labels[event['kind']]}" for event in reversed(record['events'])) if record else 'Henüz ajan bildirimi yok.'
         self._agent_details.configure(state='normal')
         self._agent_details.delete('1.0', 'end')

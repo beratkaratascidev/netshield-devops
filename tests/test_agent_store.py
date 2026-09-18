@@ -102,3 +102,26 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             AgentStore(self.settings)
         self.assertEqual(target.read_text(), 'untouched')
+
+    def test_schema_one_migration_preserves_history_and_adds_diagnostics(self):
+        import time
+        from netshield.core.agent_store import database_path
+        path = database_path(self.settings)
+        path.touch(mode=0o600)
+        with connection(path) as conn:
+            conn.execute('CREATE TABLE metadata (key TEXT PRIMARY KEY,value TEXT NOT NULL)')
+            conn.execute("INSERT INTO metadata VALUES ('legacy_imported','1')")
+            conn.execute('CREATE TABLE devices (id TEXT PRIMARY KEY,boot_time TEXT NOT NULL,session TEXT NOT NULL,received_at REAL NOT NULL)')
+            conn.execute('INSERT INTO devices VALUES (?,?,?,?)', ('pc','2026-09-18T08:00:00+00:00','unknown',time.time()))
+            conn.execute('CREATE TABLE events (position INTEGER PRIMARY KEY AUTOINCREMENT,device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,event_id TEXT NOT NULL,kind TEXT NOT NULL,source_time TEXT NOT NULL,received_at REAL NOT NULL,UNIQUE(device_id,event_id))')
+            conn.execute('INSERT INTO events (device_id,event_id,kind,source_time,received_at) VALUES (?,?,?,?,?)', ('pc','9' * 32,'session_lock','2026-09-18T08:01:00+00:00',time.time()))
+            conn.execute('PRAGMA user_version=1')
+        store = AgentStore(self.settings)
+        data = dict(status(), agent_state='running', dropped_events=2, pending_events=10)
+        store.accept('pc', data, {'pc'})
+        record = read_snapshot(self.settings)[0]['pc']
+        self.assertEqual(len(record['events']), 2)
+        self.assertEqual(record['events'][0]['id'], '9' * 32)
+        self.assertEqual(record['agent_state'], 'running')
+        self.assertEqual(record['dropped_events'], 2)
+        self.assertEqual(record['pending_events'], 10)

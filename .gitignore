@@ -9,3 +9,5 @@ agent-status.json
 *.key
 .venv/
 agent-status.sqlite3*
+**/bin/
+**/obj/

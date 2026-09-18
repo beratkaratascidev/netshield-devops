@@ -1,12 +1,13 @@
 """Transactional local agent data. No credentials, packet contents or outbound IO."""
 import os
+import json
 import sqlite3
 import stat
 import time
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DISPLAY_EVENTS = 100
 MAX_EVENTS = 1000
 DEFAULT_RETENTION_DAYS = 30
@@ -42,8 +43,8 @@ def connection(path, readonly=False):
         conn.close()
 
 
-def _version(conn):
-    if conn.execute('PRAGMA user_version').fetchone()[0] != SCHEMA_VERSION:
+def _version(conn, allow_legacy=False):
+    if conn.execute('PRAGMA user_version').fetchone()[0] not in ((1, SCHEMA_VERSION) if allow_legacy else (SCHEMA_VERSION,)):
         raise ValueError('Desteklenmeyen ajan veritabanı sürümü.')
 
 
@@ -62,7 +63,7 @@ class AgentStore:
             os.close(fd)
         with connection(self.path) as conn:
             version = conn.execute('PRAGMA user_version').fetchone()[0]
-            if version not in (0, SCHEMA_VERSION):
+            if version not in (0, 1, SCHEMA_VERSION):
                 raise ValueError('Desteklenmeyen ajan veritabanı sürümü.')
             conn.execute('PRAGMA journal_mode=WAL')
             conn.execute('PRAGMA secure_delete=ON')
@@ -71,7 +72,9 @@ class AgentStore:
                 conn.execute('CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
                 conn.execute('''CREATE TABLE IF NOT EXISTS devices (
                     id TEXT PRIMARY KEY, boot_time TEXT NOT NULL, session TEXT NOT NULL,
-                    received_at REAL NOT NULL)''')
+                    received_at REAL NOT NULL, details TEXT NOT NULL DEFAULT '{}')''')
+                if 'details' not in {row[1] for row in conn.execute('PRAGMA table_info(devices)')}:
+                    conn.execute("ALTER TABLE devices ADD COLUMN details TEXT NOT NULL DEFAULT '{}'")
                 conn.execute('''CREATE TABLE IF NOT EXISTS events (
                     position INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
                     event_id TEXT NOT NULL, kind TEXT NOT NULL, source_time TEXT NOT NULL,
@@ -84,7 +87,7 @@ class AgentStore:
                     if error:
                         raise ValueError(error)
                     for identity, record in legacy.items():
-                        normalized = validate_status({k: record[k] for k in ('boot_time', 'session', 'events')})
+                        normalized = validate_status({k: v for k, v in record.items() if k != 'received_at'})
                         self._put(conn, identity, normalized, record['received_at'])
                     conn.execute("INSERT INTO metadata VALUES ('legacy_imported', '1')")
                 conn.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
@@ -95,10 +98,11 @@ class AgentStore:
 
     @staticmethod
     def _put(conn, identity, data, received_at):
-        conn.execute('''INSERT INTO devices VALUES (?, ?, ?, ?)
+        extra = {key: data[key] for key in ('agent_state', 'dropped_events', 'pending_events') if key in data}
+        conn.execute('''INSERT INTO devices (id, boot_time, session, received_at, details) VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET boot_time=excluded.boot_time,
-            session=excluded.session, received_at=excluded.received_at''',
-                     (identity, data['boot_time'], data['session'], received_at))
+            session=excluded.session, received_at=excluded.received_at, details=excluded.details''',
+                     (identity, data['boot_time'], data['session'], received_at, json.dumps(extra)))
         for event in data['events']:
             previous = conn.execute('SELECT kind, source_time FROM events WHERE device_id=? AND event_id=?',
                                     (identity, event['id'])).fetchone()
@@ -154,7 +158,7 @@ class AgentStore:
 
 def read_database(settings_path):
     with connection(database_path(settings_path), readonly=True) as conn:
-        _version(conn)
+        _version(conn, allow_legacy=True)
         conn.execute('BEGIN')
         try:
             rows = conn.execute('SELECT * FROM devices LIMIT 501').fetchall()
@@ -164,8 +168,11 @@ def read_database(settings_path):
             for row in rows:
                 events = conn.execute('''SELECT event_id, kind, source_time FROM events
                     WHERE device_id=? ORDER BY position DESC LIMIT ?''', (row['id'], DISPLAY_EVENTS)).fetchall()
+                extra = json.loads(row['details']) if 'details' in row.keys() else {}
+                if not isinstance(extra, dict) or set(extra) - {'agent_state', 'dropped_events', 'pending_events'}:
+                    raise ValueError('Invalid stored agent diagnostics')
                 result[row['id']] = dict(boot_time=row['boot_time'], session=row['session'], received_at=row['received_at'],
-                    events=[dict(id=e['event_id'], kind=e['kind'], time=e['source_time']) for e in reversed(events)])
+                    events=[dict(id=e['event_id'], kind=e['kind'], time=e['source_time']) for e in reversed(events)], **extra)
             conn.commit()
             return result
         except BaseException:

@@ -73,8 +73,9 @@ merkezi yönetim ve yük testleri ayrıca gerekir.
 
 ## 3. Windows'ta görünür biçimde başlatın
 
-`NetShield-Agent.ps1` ve o cihaza özel `agent-config.json` dosyasını güvenli bir
-yöntemle bilgisayara aktarın. Yapılandırma bir erişim anahtarı içerir: Git'e veya
+`NetShield-Agent.ps1`, yanındaki **Core/AgentCore.cs** dosyası (klasör yapısı
+korunarak) ve cihaza özel `agent-config.json` dosyasını güvenli bir yöntemle
+bilgisayara aktarın. .NET Framework 4.7.2+ ve Windows PowerShell 5.1 gerekir. Yapılandırma bir erişim anahtarı içerir: Git'e veya
 ortak paylaşım alanına koymayın, NTFS izinlerini kullanıcı/yöneticiyle sınırlandırın.
 Kurumsal script imzalama/yürütme politikanıza uygun olarak başlatın:
 
@@ -89,9 +90,36 @@ ajan çalışmıyorken olaylar izlenmez. Sonraki çalıştırmada yalnızca son 
 zamanı öğrenilir; aradaki olaylar Windows günlüğünden geriye dönük alınmaz.
 
 Normal HTTPS sertifika/ad doğrulaması kullanılır; HTTP yönlendirmeleri izlenmez.
-Proxy ve DNS davranışı Windows ağ ayarlarına tabidir. Hata durumunda 30 saniyede
-bir yeniden denenir. En fazla 100 olay RAM'de bekler; süreç kapanırsa gönderilmeyen
-olaylar kaybolabilir. Uyku/kapanış öncesi son mesajın ulaşması garanti edilmez.
+Proxy ve DNS davranışı Windows ağ ayarlarına tabidir. Ağ iletişimi C# işçisinde
+çalışır; pencerenin timer işleyicisi ağ yanıtını beklemez. Tek gönderim aynı anda
+çalışır, istek süresi 5 saniyeyle sınırlıdır. Hatalarda rastgele küçük gecikme
+ile kademeli yeniden deneme (yaklaşık 2–61 saniye), kuyruk boşken 30 saniyelik
+heartbeat, birikmiş kayıtlar için başarılı gönderimler arasında 2,5 saniye kullanılır.
+Kapatma sırasında pencere en fazla 2 saniyelik son gönderim denemesi yapar, ardından
+isteği iptal eder; Windows kapanışını bekletmez. Son mesajın ulaşması garanti değildir.
+
+İlk `-Config` çalıştırmasında anahtar ve kuyruk, mevcut Windows kullanıcısına bağlı
+DPAPI ile `%LOCALAPPDATA%\NetShield\Agent\CIHAZ_KIMLIGI\state.dat` içinde korunur.
+Dizin ACL'si o kullanıcıyla sınırlandırılır. Sonraki çalıştırmada açık metin dosya
+gerektirmez:
+
+```powershell
+powershell.exe -STA -File .\NetShield-Agent.ps1 -DeviceId PANELDEKI_KIMLIK
+```
+
+İlk içe aktarma JSON'u otomatik silinmez; hâlâ açık metin anahtar içerir. Çalışmayı
+doğruladıktan sonra kurumunuzun güvenli saklama/silme politikasını uygulayın.
+Anahtar değiştirirken aynı cihaz/sunucu için yeni dosyayı `-Config` ile içe aktarın;
+bekleyen olaylar korunur. Başka cihaz/sunucu aynı kuyruğu kullanamaz.
+
+Kuyruk diskte en fazla 1.000 olay / 7 gün tutar, mesaj başına ilk 100 olayı gönderir.
+Teslim onayı yalnız gönderilmiş olay kimliklerini kapsıyorsa o olaylar diskten silinir.
+Onay alınmazsa kimlikleri değişmeden tekrar gönderilir. Yeni eklenen olaylar eski bir
+bildirimin onayıyla silinmez. Kota/süre nedeniyle düşen olay sayısı pencere ve panelde
+görünür. 7 günlük sınır cihaz saatine dayanır; cihaz saati yanlışsa saklama da etkilenir.
+Disk doluluğu/bozuk veya çözülemeyen durum dosyası sessizce sıfırlanmaz. Bozuk dosyayı
+koruyup kurumun kurtarma sürecini uygulayın. Kalıcı yazım bitmeden güç kesilirse
+son olay yine kaybolabilir; bu sürüm tam fiziksel güç kaybı garantisi vermez.
 
 ## 4. Erişimi iptal edin
 
@@ -112,8 +140,9 @@ bir bakım yapılır. POSIX izinleri 0600; DB yazımları işlemseldir. Eski JSO
 aktarılır ve orijinali otomatik silinmez. Ayrıntılar ve sınırlamalar
 [alıcı rehberinde](../../docs/RECEIVER_OPERATIONS.md).
 
-Windows ajanının mevcut gönderim kuyruğu hâlâ RAM'dedir; kalıcı ajan kuyruğu henüz
-uygulanmadı. Anahtar kopyalanırsa cihaz taklit edilebilir; donanımsal kimlik veya
+Windows ajanının kalıcı kuyruğu ve anahtarı CurrentUser DPAPI ile korunur. Aynı
+Windows hesabındaki yetkili/kötü amaçlı süreçler bu korumanın dışında değildir.
+Anahtar kopyalanırsa cihaz taklit edilebilir; donanımsal kimlik veya
 kurcalama koruması yoktur. Olaylar trafik JSON/HTML raporlarına eklenmez.
 
 Pilot Windows bilgisayarında sırayla doğrulayın:
@@ -131,3 +160,28 @@ Alıcı/protokol/TLS ve panel testleri Linux'ta çalıştırılır:
 API dayanakları: [SessionSwitch](https://learn.microsoft.com/en-us/dotnet/api/microsoft.win32.systemevents.sessionswitch),
 [PowerModeChanged](https://learn.microsoft.com/en-us/dotnet/api/microsoft.win32.systemevents.powermodechanged),
 [Windows açılış zamanı](https://devblogs.microsoft.com/scripting/powertip-get-the-last-boot-time-with-powershell/).
+
+## Geliştirici ve Windows kabul testleri
+
+```powershell
+powershell.exe -NoProfile -File .\Test-Agent.ps1
+```
+
+Bu betik Windows DPAPI, korumalı kuyruk yeniden açma ve bozulmuş dosyanın reddini
+sentetik verilerle kontrol eder; ağ bağlantısı veya servis kurulumu yapmaz.
+Kilit/uyku/RDP etkileşimli kabul testlerinin yerine geçmez. Bu çalışma ortamında
+betik yalnız sözdizimi açısından kontrol edildi, Windows üzerinde çalıştırılmadı.
+
+Ortak C# çekirdeği Linux'ta .NET 10 SDK ile test edilebilir:
+
+```bash
+dotnet run --project agents/windows/Core.Tests/Core.Tests.csproj
+dotnet build agents/windows/Core/AgentCore.csproj
+.venv/bin/python scripts/test_agent_core_https.py --dotnet /path/to/dotnet
+```
+
+13 ortak çekirdek testi geçiyor; test koruyucusu DPAPI değildir. Framework 4.7.2
+hedefiyle derleme ve PowerShell parser kontrolü geçmiştir. Gerçek C# HttpClient ile
+Python HTTPS alıcısı testi güvenilmeyen TLS'de kuyruğun korunduğunu, güvenilen
+sertifikayla yeniden başlatmada teslim edildiğini doğrular. Windows işletim sistemi
+üzerindeki koruma/oturum/uyku/kapanış doğrulaması hâlâ zorunlu açık iştir.
