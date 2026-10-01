@@ -5,6 +5,27 @@ paketleri listeler; hız ve port çeşitliliği eşiklerine göre şüpheli traf
 alarmları üretir. Cihaz/bağlantı takibi ve alarm inceleme araçları içerir. Wireshark benzeri paket listesi ve ayrıntı düzeni sunar;
 Wireshark'ın tüm protokol çözümleyicilerini veya filtre dilini içermez.
 
+> **Durum: MVP / pilot sürüm.** NetShield, yerel ve pasif ağ görünürlüğü ile
+> isteğe bağlı Windows cihaz durum bildirimini bir araya getiren portföy
+> projesidir. Gerçek Windows servis kabulü, imzalı dağıtım ve rol tabanlı
+> yetkilendirme henüz tamamlanmamıştır; ayrıntılı sınırlar
+> [uygulama takibinde](docs/IMPLEMENTATION_STATUS.md) bulunur.
+
+## Hızlı demo
+
+1. `python3 ids.py` komutuyla uygulamayı açın; Scapy veya yakalama izni yoksa
+   uygulama otomatik olarak güvenli **Simülasyon** modunda başlar.
+2. **Demo üret** düğmesiyle sentetik paket ve alarmları üretin.
+3. **Alarmlar** sekmesinde önem ve inceleme durumunu filtreleyin; bir kaydı
+   seçerek ölçüm/eşik ayrıntısını inceleyin.
+4. **Cihazlar ve bağlantılar** sekmesinde akış veya cihaz kaydına çift tıklayıp
+   pakete geri dönün. Bu adım gerçek cihazlara bağlantı kurmaz.
+5. İsteğe bağlı olarak **Çalışma alanı → Yerel yedek oluştur** ile anahtarsız
+   kurtarma arşivi oluşturun.
+
+İki dakikalık sunum metni ve izlenecek ekran akışı için
+[demo rehberini](docs/DEMO.md) kullanın.
+
 ## Çalıştırma
 
 Python 3.10+ ve Tkinter gerekir. Canlı dinleme için Scapy kurulmalıdır.
@@ -49,6 +70,9 @@ switch üzerinde port aynalama/SPAN, bir TAP veya ilgili ağ geçidinden
   bellekteki bütün kayıtları içerir.
 - **HTML rapor:** Maskeli alarm geçmişi. Kullanıcı dosya konumunu seçer;
   tarayıcı otomatik açılmaz. Kurumsal profilde JSON ve HTML kaydı kapalıdır.
+- **Yönetim denetim günlüğü:** Ayar, cihaz ve eşleştirme anahtarı işlemlerinin
+  sınırlı yerel kaydı. Salt okunur arayüzden görüntülenir; anahtar, paket
+  içeriği ve serbest metin saklanmaz.
 
 ### Görüntüleme filtresi
 
@@ -156,7 +180,10 @@ değildir. Önizleme taşması varsa takip tablosu yakalanan tüm paketleri kaps
 ### Görünüm ve ayarlar
 
 Üstteki **Çalışma alanı** menüsünde görünüm/IP takip ayarları, eşik profilleri
-ve durdurulmuş yakalama için arayüz listesini yenileme bulunur. **Görünüm**
+ve durdurulmuş yakalama için arayüz listesini yenileme bulunur. Aynı menüden
+yerel yedek oluşturulabilir veya bir yedek yalnızca yeni bir kurtarma klasörüne
+geri yüklenebilir. **Yönetim denetim günlüğü** sekmesi, ayar/cihaz/anahtar
+işlemlerini salt okunur olarak gösterir. **Görünüm**
 menüsünden sağ panel ve paket ayrıntıları gizlenebilir. Rahat/Kompakt tablo
 satır yoğunluğu seçilebilir.
 
@@ -267,4 +294,14 @@ Hedef yedek dosyası ve geri yükleme dizini önceden bulunmamalıdır. Canlı k
 üzerine yazılmaz. Kurtarılan dizini uygulama/alıcıyla kullanmadan önce komutun
 başarıyla bitmesini bekleyin; içeriği kontrol edin ve cihazları yeniden eşleştirin.
 Başarısız/yarıda kesilmiş kurtarma dizinini kullanmayın. Windows kurulum paketi,
-GUI yedek sihirbazı ve otomatik sürüm geri alma bu komutlarla tamamlanmış sayılmaz.
+otomatik sürüm geri alma bu komutlarla tamamlanmış sayılmaz. GUI'de aynı akış
+**Çalışma alanı → Yerel yedek oluştur** ve **Yedekten yeni klasöre geri yükle**
+menülerinden, arayüzü kilitlemeyen arka plan işiyle kullanılabilir.
+
+## Portföy ve yayın notları
+
+İlk yayın için kapsam, doğrulama komutları ve bilinen sınırlar
+[v0.1.0 sürüm notlarında](docs/RELEASE_NOTES_v0.1.0.md) listelenir. Projeyi
+sunarken “pasif ağ analizi + güvenli yerel iş akışları + isteğe bağlı Windows
+ajanı” olarak tanımlayın; saldırı tespitinin kesin hüküm veya üretim sertifikası
+olduğunu iddia etmeyin.
