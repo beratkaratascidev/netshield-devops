@@ -37,6 +37,22 @@ class WorkspaceTests(unittest.TestCase):
                 self.fail('Status reader did not finish')
             time.sleep(.005)
 
+    def wait_audit_refresh(self):
+        deadline = time.monotonic() + 3
+        while self.app._audit_request_id is not None or self.app._audit_refresh_pending:
+            self.root.update()
+            if time.monotonic() > deadline:
+                self.fail('Audit reader did not finish')
+            time.sleep(.005)
+
+    def wait_backup_job(self):
+        deadline = time.monotonic() + 3
+        while self.app._backup_future is not None:
+            self.root.update()
+            if time.monotonic() > deadline:
+                self.fail('Backup job did not finish')
+            time.sleep(.005)
+
     def test_firewall_refresh_keeps_gui_responsive_and_restores_system_rules(self):
         import threading
         entered, release = threading.Event(), threading.Event()
@@ -273,6 +289,38 @@ class WorkspaceTests(unittest.TestCase):
                 self.wait_agent_refresh()
         finally:
             release.set()
+
+    def test_audit_tab_is_read_only_and_loads_in_background(self):
+        a = self.app
+        self.assertTrue(a._commit_preferences(density='Kompakt'))
+        a._notebook.select(a._audit_page)
+        self.root.update()
+        self.wait_audit_refresh()
+        rows = a._audit_tree.get_children()
+        self.assertTrue(rows)
+        a._audit_tree.selection_set(rows[0])
+        a._show_audit_details()
+        self.assertIn('Ayar kaydı', a._audit_details.cget('text'))
+        self.assertIn('salt okunurdur', a._audit_details.cget('text'))
+
+    def test_backup_and_restore_use_new_directory_without_blocking_gui(self):
+        a = self.app
+        self.assertTrue(a._commit_preferences(density='Kompakt'))
+        archive = Path(self.settings_dir.name) / 'backup.zip'
+        with patch('netshield.ui.panels.filedialog.asksaveasfilename', return_value=str(archive)), \
+             patch('netshield.ui.panels.messagebox.showinfo'):
+            a._create_backup()
+            self.wait_backup_job()
+        self.assertTrue(archive.is_file())
+        recovery_parent = Path(self.settings_dir.name) / 'recoveries'
+        recovery_parent.mkdir()
+        with patch('netshield.ui.panels.filedialog.askopenfilename', return_value=str(archive)), \
+             patch('netshield.ui.panels.filedialog.askdirectory', return_value=str(recovery_parent)), \
+             patch('netshield.ui.panels.simpledialog.askstring', return_value='restored'), \
+             patch('netshield.ui.panels.messagebox.showinfo'):
+            a._restore_backup()
+            self.wait_backup_job()
+        self.assertTrue((recovery_parent / 'restored' / 'settings.json').is_file())
 
     def test_pairing_wizard_without_ip_creates_config_checks_status_and_revokes(self):
         from netshield.core.enrollment import read_credentials

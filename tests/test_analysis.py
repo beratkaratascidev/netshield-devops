@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from netshield.core.filters import compile_filter
+from netshield.core.audit import audit_path, read_recent
 from netshield.core.settings import load_settings, save_settings, validate_settings
 from netshield.core.tracking import summarize
 from netshield.config import ESIKLER
@@ -93,7 +94,10 @@ class SettingsTests(unittest.TestCase):
                 with self.assertRaises(OSError):
                     save_settings(path, {'density': 'Kompakt'})
             self.assertEqual(path.read_text(), original)
-            self.assertEqual(list(Path(folder).iterdir()), [path])
+            self.assertFalse(list(Path(folder).glob('.settings-*')))
+            self.assertEqual({item.name for item in Path(folder).iterdir()},
+                             {'settings.json', audit_path(path).name})
+            self.assertEqual(read_recent(path, limit=1)[0]['outcome'], 'failed')
 
     def test_invalid_preferences_rejected(self):
         for data in ({'watchlist': ['bad']}, {'watchlist': [1]}, {'density': 'bad'},

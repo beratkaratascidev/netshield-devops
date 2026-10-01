@@ -1,9 +1,13 @@
 """Monitoring, review, keyboard actions and persistent workspace preferences."""
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog, simpledialog
+from datetime import datetime
+from pathlib import Path
 from netshield.core.settings import save_settings, validate_settings
 from netshield.core.tracking import summarize
 from netshield.core.security import effective_policy, PrivateSnapshot, load_managed_policy
+from netshield.core.audit import AuditReader
+from netshield.backup import create_backup, restore_backup
 import json
 import shlex
 from netshield.ui.theme import BG, SURF, CARD, TXT, MUT, ACC, GRN, YLW, RED, TUR_RENK
@@ -78,7 +82,9 @@ class AnalysisPanels(InventoryPanel):
         self._interfaces_tree = self._table(networks, [('interface', 'Arayüz', 160), ('status', 'Durum', 180), ('packets', 'Paket', 160)])
         self._interfaces_tree.bind('<Double-1>', lambda _: self._follow_interface())
         self._tracking_dirty = True
-        self._notebook.bind('<<NotebookTabChanged>>', lambda _: self._refresh_tracking())
+        self._notebook.bind('<<NotebookTabChanged>>', self._workspace_tab_changed)
+
+        self._build_audit_panel()
 
         menubar = tk.Menu(self.root, bg=SURF, fg=TXT, activebackground=CARD, activeforeground=TXT)
         workspace = tk.Menu(menubar, tearoff=False)
@@ -86,6 +92,9 @@ class AnalysisPanels(InventoryPanel):
         workspace.add_command(label='Görünüm ve IP takip ayarları', command=self._preferences)
         workspace.add_command(label='Tespit eşikleri ve profilleri', command=self._thresholds)
         workspace.add_command(label='Ağ arayüzlerini yenile', command=self._refresh_interfaces)
+        workspace.add_separator()
+        workspace.add_command(label='Yerel yedek oluştur', command=self._create_backup)
+        workspace.add_command(label='Yedekten yeni klasöre geri yükle', command=self._restore_backup)
         workspace.add_separator()
         workspace.add_command(label='JSON dışa aktar', command=self._export, accelerator='Ctrl+E')
         workspace.add_command(label='HTML rapor', command=self._rapor)
@@ -105,6 +114,157 @@ class AnalysisPanels(InventoryPanel):
         self._packet_tree.bind('<Button-3>', self._packet_menu)
         self._packet_tree.bind('<Control-c>', lambda _: self._copy_selected_packet())
         self._apply_density()
+
+    def _workspace_tab_changed(self, _=None):
+        self._refresh_tracking()
+        if hasattr(self, '_audit_page') and self._notebook.select() == str(self._audit_page):
+            self._refresh_audit_panel()
+
+    def _start_backup_job(self, task, success):
+        if self._backup_future is not None:
+            messagebox.showinfo('Yedekleme', 'Başka bir yedekleme veya geri yükleme işlemi sürüyor.', parent=self.root)
+            return False
+        self._backup_future = self._backup_worker.submit(task)
+        def poll():
+            self._backup_after = None
+            if self._closed:
+                return
+            if not self._backup_future.done():
+                self._backup_after = self.root.after(25, poll)
+                return
+            try:
+                result = self._backup_future.result()
+            except (OSError, ValueError, PermissionError) as exc:
+                messagebox.showerror('Yedekleme tamamlanamadı', str(exc), parent=self.root)
+                self._syslog('HATA', f'Yedekleme tamamlanamadı: {type(exc).__name__}')
+            except Exception:
+                messagebox.showerror('Yedekleme tamamlanamadı', 'Arşivi, hedef klasörü ve dosya izinlerini kontrol edin.', parent=self.root)
+                self._syslog('HATA', 'Yedekleme beklenmeyen hatayla tamamlanamadı.')
+            else:
+                success(result)
+            finally:
+                self._backup_future = None
+        self._backup_after = self.root.after(25, poll)
+        return True
+
+    def _create_backup(self):
+        if not self._security_allows('allow_exports'):
+            return
+        output = filedialog.asksaveasfilename(parent=self.root, title='Yerel yedek oluştur',
+                                               initialfile='netshield-backup.zip', defaultextension='.zip',
+                                               filetypes=[('NetShield yedeği', '*.zip')])
+        if not output:
+            return
+        def success(path):
+            messagebox.showinfo('Yedekleme tamamlandı', f'Yedek oluşturuldu:\n{path}\n\nAnahtarlar yedeğe dahil edilmez.', parent=self.root)
+            self._syslog('SİSTEM', 'Yerel yedek oluşturuldu; eşleştirme anahtarları dahil edilmedi.')
+        self._start_backup_job(lambda: create_backup(self.settings_path, output), success)
+
+    def _restore_backup(self):
+        archive = filedialog.askopenfilename(parent=self.root, title='NetShield yedeğini seçin',
+                                              filetypes=[('NetShield yedeği', '*.zip'), ('Tüm dosyalar', '*')])
+        if not archive:
+            return
+        parent = filedialog.askdirectory(parent=self.root, title='Yeni kurtarma klasörünün üst dizinini seçin')
+        if not parent:
+            return
+        name = simpledialog.askstring('Yeni kurtarma klasörü', 'Yeni, boş olmayan bir klasör adı girin:',
+                                      initialvalue='netshield-recovery', parent=self.root)
+        if name is None:
+            return
+        if not name or name in ('.', '..') or '/' in name or '\\' in name or '\x00' in name:
+            messagebox.showerror('Geri yükleme', 'Geçerli bir yeni klasör adı girin.', parent=self.root)
+            return
+        destination = Path(parent) / name
+        def success(path):
+            messagebox.showinfo('Geri yükleme tamamlandı',
+                                f'Kurtarma yeni klasöre yazıldı:\n{path}\n\nCanlı ayarlar ve anahtarlar değiştirilmedi.', parent=self.root)
+            self._syslog('SİSTEM', 'Yedek yeni bir klasöre geri yüklendi; canlı ayarlar değiştirilmedi.')
+        self._start_backup_job(lambda: restore_backup(archive, destination), success)
+
+    def _build_audit_panel(self):
+        page = tk.Frame(self._notebook, bg=SURF)
+        self._audit_page = page
+        self._notebook.add(page, text='Yönetim denetim günlüğü')
+        self._audit_notice = tk.Label(page, text='Yerel, salt okunur işlem günlüğü yükleniyor.', bg=SURF, fg=MUT,
+                                      padx=10, pady=10, anchor='w')
+        self._audit_notice.pack(fill='x')
+        actions = tk.Frame(page, bg=SURF, padx=10, pady=4)
+        actions.pack(fill='x')
+        self._button(actions, 'Yenile', self._refresh_audit_panel).pack(side='left')
+        tk.Label(actions, text='Son 1000 kayıt · 90 gün / 10.000 kayıt sınırı · paket ve anahtar içeriği tutulmaz',
+                 bg=SURF, fg=MUT).pack(side='left', padx=10)
+        self._audit_details = tk.Label(page, text='Bir kayıt seçin.', bg=CARD, fg=TXT, anchor='w', justify='left',
+                                       padx=10, pady=8)
+        self._audit_details.pack(side='bottom', fill='x', padx=10, pady=10)
+        self._audit_tree = self._table(page, [('finished', 'Zaman', 165), ('action', 'İşlem', 180),
+                                              ('target', 'Hedef', 180), ('actor', 'İşleten', 120), ('outcome', 'Sonuç', 115)])
+        self._audit_records = {}
+        self._audit_error = None
+        self._audit_reader = AuditReader(self.settings_path)
+        self._audit_request_id = None
+        self._audit_refresh_pending = False
+        self._audit_tree.bind('<<TreeviewSelect>>', lambda _: self._show_audit_details())
+
+    def _refresh_audit_panel(self):
+        if not hasattr(self, '_audit_tree'):
+            return
+        self._render_audit_panel()
+        if self._audit_reader.request():
+            self._audit_request_id = self.root.after(25, self._poll_audit_log)
+        else:
+            self._audit_refresh_pending = True
+
+    def _poll_audit_log(self):
+        self._audit_request_id = None
+        if self._closed:
+            return
+        result = self._audit_reader.poll()
+        if result is None:
+            self._audit_request_id = self.root.after(25, self._poll_audit_log)
+            return
+        records, self._audit_error = result
+        self._audit_records = {record['id']: record for record in records}
+        self._render_audit_panel()
+        if self._audit_refresh_pending:
+            self._audit_refresh_pending = False
+            self._refresh_audit_panel()
+
+    def _render_audit_panel(self):
+        message = self._audit_error or ('Henüz denetim kaydı yok.' if not self._audit_records else
+                                        f'{len(self._audit_records)} yerel denetim kaydı gösteriliyor.')
+        self._audit_notice.configure(text=message)
+        wanted = set(self._audit_records)
+        existing = set(self._audit_tree.get_children())
+        if existing - wanted:
+            self._audit_tree.delete(*(existing - wanted))
+        labels = {'settings_save': 'Ayar kaydı', 'device_add': 'Cihaz eklendi', 'device_edit': 'Cihaz düzenlendi',
+                  'device_remove': 'Cihaz silindi', 'credential_enroll': 'Anahtar oluşturuldu',
+                  'credential_revoke': 'Anahtar iptal edildi', 'credential_activate': 'Anahtar etkinleştirildi'}
+        outcomes = {'succeeded': 'Başarılı', 'failed': 'Başarısız', 'started': 'Sonuç bilinmiyor'}
+        for record in self._audit_records.values():
+            stamp = record['finished'] if record['finished'] is not None else record['started']
+            values = (datetime.fromtimestamp(stamp).strftime('%Y-%m-%d %H:%M:%S'),
+                      labels.get(record['action'], 'Bilinmeyen işlem'), record['target'] or '—',
+                      record['actor'], outcomes.get(record['outcome'], 'Bilinmiyor'))
+            if self._audit_tree.exists(record['id']):
+                if self._audit_tree.item(record['id'], 'values') != tuple(str(value) for value in values):
+                    self._audit_tree.item(record['id'], values=values)
+            else:
+                self._audit_tree.insert('', 'end', iid=record['id'], values=values)
+        self._apply_table_order(self._audit_tree)
+        self._show_audit_details()
+
+    def _show_audit_details(self):
+        selection = self._audit_tree.selection()
+        text = 'Bir kayıt seçin. Bu görünüm salt okunurdur.'
+        if selection:
+            record = self._audit_records.get(selection[0])
+            if record:
+                text = (f"İşlem: {self._audit_tree.set(record['id'], 'action')} · Hedef: {record['target'] or '—'}\n"
+                        f"Başlatan: {record['actor']} · Sonuç: {self._audit_tree.set(record['id'], 'outcome')}\n"
+                        'Bu görünüm salt okunurdur; anahtarlar, paket içerikleri ve serbest metin günlüğe yazılmaz.')
+        self._audit_details.configure(text=text)
 
     def _sort_table(self, tree, column):
         state = getattr(self, '_table_orders', {})

@@ -14,8 +14,8 @@ performans ve yayın öncesi kontroller. Bu liste tamamlanmadan tüm hedef bitmi
 | İşlemsel durum/olay deposu ve saklama süresi | Uygulandı ve yerelde doğrulandı | test_agent_store: migration, rollback, concurrency, restart, retention; backup ayrı iş |
 | Ayrıcalıklı yakalama yardımcısı | Bekliyor | Normal kullanıcıda yakalama, yetkisiz isteğin reddi |
 | IP'den bağımsız ajan envanteri | Opsiyonel IP tamam; zaman damgalı IP eşleştirme bekliyor | Birden çok IP'siz kayıt, seçilen cihazda doğru işlem ve boş IP ile filtre güvenliği testleri |
-| Roller, korumalı anahtar ve denetim izi | DPAPI/ACL kodu eklendi; gerçek Windows doğrulaması, roller ve denetim izi bekliyor | CurrentUser DPAPI; Windows smoke betiği; imza/hesap ayrımı açık |
-| Yedek/geri yükleme | Yerel CLI uygulandı; GUI sihirbazı ve gerçek dağıtım kabulü bekliyor | 200 olayın bağlamıyla geri dönüşü, anahtar hariç tutma, politika, bozuk arşiv ve üzerine yazma reddi |
+| Roller, korumalı anahtar ve denetim izi | Korumalı anahtar, sınırlı yerel denetim günlüğü ve salt okunur günlük görünümü uygulandı; gerçek Windows doğrulaması ve roller bekliyor | CurrentUser DPAPI; Windows smoke betiği; ayar/cihaz/anahtar değişikliklerinde token ve serbest metin içermeyen 90 gün/10.000 kayıtla sınırlı SQLite günlüğü |
+| Yedek/geri yükleme | Yerel CLI ve GUI akışı uygulandı; gerçek dağıtım kabulü bekliyor | 200 olayın bağlamıyla geri dönüşü, anahtar hariç tutma, politika, bozuk arşiv ve üzerine yazma reddi; GUI arka plan işiyle yalnızca yeni bir klasöre geri yükler |
 | Tanılama ve sürüm uyumluluğu | Ajan DNS/TLS/kimlik/ACK/kota kodları uygulandı; birleşik tanılama ekranı bekliyor | Core hata sınıflandırma, DB 1→2 geçmiş koruma, V1/V2 testleri |
 | Başlangıç oturum bilgisi ve saat sapması | Olay oturum/açılış bağlamı uygulandı; başlangıç kilit bilgisi, servis ve saat sapması bekliyor | Yeniden açma, geçmiş bağlamı, RDP/gerçek Windows ve saat ileri/geri testleri |
 | Tespit eşik/istisna/tekrar yönetimi | Bekliyor | Etiketli normal ve anormal trafik ölçümü |
@@ -70,3 +70,17 @@ Bu grup sonunda 117 Python testi ResourceWarning hata moduyla geçti. Firewall
 GUI duyarlılığı, sistem kuralı kurtarma, ICMPv6, parçalı HTTP, sağlık durumu, yedek
 ve anahtar geçişi yeni regresyonlarla kapsanıyor. Gerçek Windows/firewall kabulü
 ve imzalı dağıtım hâlâ yapılmadı; tüm hedef tamamlandı olarak işaretlenmedi.
+
+1 Ekim 2026: Yerel yönetim denetim günlüğü tamamlandı. Ayar kaydı ile cihaz ekleme,
+düzenleme/silme ve eşleştirme anahtarı oluşturma/iptal/etkinleştirme başarı veya
+başarısızlık sonucuyla kaydedilir. Günlük 90 gün ve 10.000 kayıtla sınırlıdır;
+token, paket verisi ve serbest metin içermez. Başarısız atomik ayar yazımı ve
+günlük alan sınırları regresyon testleriyle kapsandı. Rol tabanlı yetkilendirme,
+gerçek Windows kimlik doğrulaması ayrı açık işlerdir. Günlük arayüzü SQLite
+okumasını Tk olay döngüsünün dışında, tek çalışanlı bir işçiyle yapar ve yalnızca
+okuma/yenileme işlevi sunar.
+
+1 Ekim 2026: GUI'ye yerel yedek oluşturma ve yalnızca yeni klasöre geri yükleme
+akışı eklendi. Arşiv oluşturma/okuma arka plan işinde yürür; etkin dışa aktarma
+politikası hem dosya seçmeden önce hem de arşiv üretiminde denetlenir. Geri yükleme
+canlı ayarları veya eşleştirme anahtarlarını değiştirmez.

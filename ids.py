@@ -44,6 +44,9 @@ class App(WorkspaceUI):
         self._firewall_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix='netshield-firewall')
         self._firewall_future = None
         self._firewall_after = None
+        self._backup_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix='netshield-backup')
+        self._backup_future = None
+        self._backup_after = None
         self.olaylar = []
         self.sayac = defaultdict(int)
         self.trafik = deque([0] * 90, maxlen=90)
@@ -223,12 +226,19 @@ class App(WorkspaceUI):
         if self._firewall_after is not None:
             self.root.after_cancel(self._firewall_after)
         self._firewall_worker.shutdown(wait=False, cancel_futures=True)
+        if self._backup_after is not None:
+            self.root.after_cancel(self._backup_after)
+        self._backup_worker.shutdown(wait=False, cancel_futures=True)
         if self._after_id is not None:
             self.root.after_cancel(self._after_id)
         if hasattr(self, '_agent_reader'):
             if self._agent_request_id is not None:
                 self.root.after_cancel(self._agent_request_id)
             self._agent_reader.close()
+        if hasattr(self, '_audit_reader'):
+            if self._audit_request_id is not None:
+                self.root.after_cancel(self._audit_request_id)
+            self._audit_reader.close()
         if self.motor:
             self.motor.dur()
         self.root.destroy()

@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from netshield.core.audit import audited
 from netshield.core.security import private_write
 from netshield.core.settings import load_settings
 
@@ -57,6 +58,7 @@ def credential_matches(value, token):
     return False
 
 
+@audited('credential_activate')
 def activate_pending(settings_path, identity, token):
     """Called only after a valid status commit; failed publication keeps both keys."""
     path = Path(settings_path).parent / 'agent-credentials.json'
@@ -131,6 +133,7 @@ def enrollment_lock(directory):
         os.close(fd)
 
 
+@audited('credential_enroll')
 def enroll(settings_path, identity, server, output):
     settings_path, output = Path(settings_path), Path(output)
     server = server_origin(server)
@@ -139,7 +142,7 @@ def enroll(settings_path, identity, server, output):
     credentials_path = settings_path.parent / 'agent-credentials.json'
     protected = {settings_path.resolve(), credentials_path.resolve(),
                  (settings_path.parent / '.agent-enrollment.lock').resolve()}
-    if output.resolve() in protected or output.name.startswith('agent-status.'):
+    if output.resolve() in protected or output.name.startswith(('agent-status.', 'admin-audit.')):
         raise ValueError('Yapılandırma için uygulama veri dosyasını seçmeyin.')
     with enrollment_lock(settings_path.parent):
         settings, error = load_settings(settings_path)
@@ -167,6 +170,7 @@ def enroll(settings_path, identity, server, output):
     return output
 
 
+@audited('credential_revoke')
 def revoke(settings_path, identity):
     path = Path(settings_path).parent / 'agent-credentials.json'
     with enrollment_lock(path.parent):

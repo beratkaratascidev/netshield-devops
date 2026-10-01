@@ -43,7 +43,7 @@ def load_settings(path):
         return validate_settings({'security': {'profile': 'Kurumsal'}}), f'Ayarlar okunamadı; kısıtlı güvenlik profili kullanılıyor: {exc}'
 
 
-def save_settings(path, data):
+def _save_settings(path, data):
     data = validate_settings(data)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -59,3 +59,20 @@ def save_settings(path, data):
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def save_settings(path, data):
+    from netshield.core.audit import operation
+    data = validate_settings(data)
+    previous, error = load_settings(path)
+    old = {d['id']: d for d in previous['devices']} if error is None else {}
+    new = {d['id']: d for d in data['devices']}
+    changes = [('settings_save', '')]
+    changes += [('device_remove', identity) for identity in sorted(old.keys() - new.keys())]
+    for identity, device in new.items():
+        if identity not in old:
+            changes.append(('device_add', identity))
+        elif device != old[identity]:
+            changes.append(('device_edit', identity))
+    with operation(path, changes):
+        _save_settings(path, data)
