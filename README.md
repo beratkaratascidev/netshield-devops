@@ -1,5 +1,9 @@
 # NetShield — Ağ Analizi
 
+[![Kontroller](https://github.com/beratkaratascidev/netshield-devops/actions/workflows/verify.yml/badge.svg)](https://github.com/beratkaratascidev/netshield-devops/actions/workflows/verify.yml)
+
+[Ön sürümler](https://github.com/beratkaratascidev/netshield-devops/releases) · [Proje devri ve açık işler](docs/PROJECT_HANDOFF.md)
+
 Türkçe, koyu temalı Tkinter masaüstü uygulaması. Seçilen ağ arayüzündeki
 paketleri listeler; hız ve port çeşitliliği eşiklerine göre şüpheli trafik
 alarmları üretir. Cihaz/bağlantı takibi ve alarm inceleme araçları içerir. Wireshark benzeri paket listesi ve ayrıntı düzeni sunar;

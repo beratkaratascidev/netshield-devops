@@ -11,3 +11,11 @@ agent-status.json
 agent-status.sqlite3*
 **/bin/
 **/obj/
+admin-audit.sqlite3*
+.env
+.env.*
+*.pem
+*.pfx
+*.p12
+settings.json
+*.zip

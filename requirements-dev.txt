@@ -1,0 +1,3 @@
+# Reproducible Python test dependencies; Tkinter is supplied by the OS/Python build.
+-r requirements-receiver.txt
+scapy==2.7.0

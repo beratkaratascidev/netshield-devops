@@ -57,8 +57,7 @@ sınırlı HTTP/1 parçalı istek satırı tespiti eklendi. Canlı yakalamada Un
 önkoşulu kaldırıldı; soket izni belirleyicidir. Bu ayrıcalıklı yardımcı/Windows
 sürücü testini tamamlamaz. Alıcı yazım hatası sağlık göstergesine yansır.
 
-Tüm kapsam henüz bitmedi: Windows servis/eşlikçi, gerçek Windows kabulü, roller ve
-denetim izi, GUI tanılama/yedekleme ekranı, ayrıcalıklı
+Tüm kapsam henüz bitmedi: Windows servis/eşlikçi, gerçek Windows kabulü, roller, merkezi denetim, birleşik tanılama, ayrıcalıklı
 capture yardımcısı, tam TCP/HTTP analizi ve uzun süre/yanlış alarm ölçümleri açık.
 
 Anahtar geçişi de eklendi: mevcut anahtar yeni anahtarla ilk geçerli commit'e kadar
@@ -84,3 +83,8 @@ okuma/yenileme işlevi sunar.
 akışı eklendi. Arşiv oluşturma/okuma arka plan işinde yürür; etkin dışa aktarma
 politikası hem dosya seçmeden önce hem de arşiv üretiminde denetlenir. Geri yükleme
 canlı ayarları veya eşleştirme anahtarlarını değiştirmez.
+
+1 Ekim 2026 yayın kontrolü: 124 Python ve 15 C# testi, Framework derlemesi ve HTTPS
+entegrasyonu yeniden geçti. GitHub Linux/Windows smoke ve koşullu ön sürüm yayını
+eklenmiştir; uzaktaki sonuçlar Actions kaydından takip edilir. Açık kapsam
+PROJECT_HANDOFF.md içinde korunur. Tüm üretim hedefleri tamamlanmış sayılmaz.
