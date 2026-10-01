@@ -2,7 +2,8 @@
 
 Bu sürüm Windows 10/11, Windows PowerShell 5.1 ve etkileşimli kullanıcı oturumu
 hedefler. Sunucu ve mevcut NetShield paneli aynı Linux makinesinde, aynı ayar
-dosyasını kullanır. Windows üzerinde gerçek çalışma testi henüz yapılmamıştır;
+dosyasını kullanır. Windows Server 2022 üzerinde DPAPI/kuyruk smoke testi geçti; Windows 10/11
+etkileşimli çalışma testi henüz yapılmamıştır;
 önce aşağıdaki pilot kontrolleri tamamlayın. Bu bir Windows servisi veya hazır MSI değildir.
 
 ## Neler bildirilir?
@@ -172,8 +173,9 @@ powershell.exe -NoProfile -File .\Test-Agent.ps1
 
 Bu betik Windows DPAPI, korumalı kuyruk yeniden açma ve bozulmuş dosyanın reddini
 sentetik verilerle kontrol eder; ağ bağlantısı veya servis kurulumu yapmaz.
-Kilit/uyku/RDP etkileşimli kabul testlerinin yerine geçmez. Bu çalışma ortamında
-betik yalnız sözdizimi açısından kontrol edildi, Windows üzerinde çalıştırılmadı.
+Kilit/uyku/RDP etkileşimli kabul testlerinin yerine geçmez. Linux ortamında parser kontrolü, GitHub Windows Server 2022 runner'ında ise
+PowerShell 5.1 ile gerçek DPAPI/kuyruk kontrolü geçti.
+[Windows smoke kanıtı](https://github.com/beratkaratascidev/netshield-devops/actions/runs/36833438567/job/110275085133).
 
 Ortak C# çekirdeği Linux'ta .NET 10 SDK ile test edilebilir:
 

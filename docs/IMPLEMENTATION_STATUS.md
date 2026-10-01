@@ -14,7 +14,7 @@ performans ve yayın öncesi kontroller. Bu liste tamamlanmadan tüm hedef bitmi
 | İşlemsel durum/olay deposu ve saklama süresi | Uygulandı ve yerelde doğrulandı | test_agent_store: migration, rollback, concurrency, restart, retention; backup ayrı iş |
 | Ayrıcalıklı yakalama yardımcısı | Bekliyor | Normal kullanıcıda yakalama, yetkisiz isteğin reddi |
 | IP'den bağımsız ajan envanteri | Opsiyonel IP tamam; zaman damgalı IP eşleştirme bekliyor | Birden çok IP'siz kayıt, seçilen cihazda doğru işlem ve boş IP ile filtre güvenliği testleri |
-| Roller, korumalı anahtar ve denetim izi | Korumalı anahtar, sınırlı yerel denetim günlüğü ve salt okunur günlük görünümü uygulandı; gerçek Windows doğrulaması ve roller bekliyor | CurrentUser DPAPI; Windows smoke betiği; ayar/cihaz/anahtar değişikliklerinde token ve serbest metin içermeyen 90 gün/10.000 kayıtla sınırlı SQLite günlüğü |
+| Roller, korumalı anahtar ve denetim izi | Korumalı anahtar, sınırlı yerel denetim günlüğü ve salt okunur günlük görünümü uygulandı; Windows 10/11 etkileşimli kabulü ve roller bekliyor | CurrentUser DPAPI; Windows smoke betiği; ayar/cihaz/anahtar değişikliklerinde token ve serbest metin içermeyen 90 gün/10.000 kayıtla sınırlı SQLite günlüğü |
 | Yedek/geri yükleme | Yerel CLI ve GUI akışı uygulandı; gerçek dağıtım kabulü bekliyor | 200 olayın bağlamıyla geri dönüşü, anahtar hariç tutma, politika, bozuk arşiv ve üzerine yazma reddi; GUI arka plan işiyle yalnızca yeni bir klasöre geri yükler |
 | Tanılama ve sürüm uyumluluğu | Ajan DNS/TLS/kimlik/ACK/kota kodları uygulandı; birleşik tanılama ekranı bekliyor | Core hata sınıflandırma, DB 1→2 geçmiş koruma, V1/V2 testleri |
 | Başlangıç oturum bilgisi ve saat sapması | Olay oturum/açılış bağlamı uygulandı; başlangıç kilit bilgisi, servis ve saat sapması bekliyor | Yeniden açma, geçmiş bağlamı, RDP/gerçek Windows ve saat ileri/geri testleri |
@@ -88,3 +88,9 @@ canlı ayarları veya eşleştirme anahtarlarını değiştirmez.
 entegrasyonu yeniden geçti. GitHub Linux/Windows smoke ve koşullu ön sürüm yayını
 eklenmiştir; uzaktaki sonuçlar Actions kaydından takip edilir. Açık kapsam
 PROJECT_HANDOFF.md içinde korunur. Tüm üretim hedefleri tamamlanmış sayılmaz.
+
+1 Ekim 2026: Windows Server 2022 / PowerShell 5.1 üzerinde gerçek CurrentUser
+DPAPI round-trip, korumalı kuyruk yeniden açma ve bozuk dosya reddi geçti. İlk
+çalıştırmada saptanan eksik System.Xml derleme referansı ajan ve smoke betiğinde
+düzeltildi. [CI kanıtı](https://github.com/beratkaratascidev/netshield-devops/actions/runs/36833438567/job/110275085133). Windows 10/11, WinForms,
+RDP/uyku ve servis kabulü bundan ayrı açık işlerdir.

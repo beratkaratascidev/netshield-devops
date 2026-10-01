@@ -9,7 +9,7 @@ Bu sürüm mevcut NetShield MVP'sinin yayın ve geliştirici iş akışını dü
   ve C# → HTTPS → SQLite entegrasyonu.
 - Windows PowerShell 5.1 Add-Type derlemesindeki eksik `System.Xml` referansı düzeltildi.
 - Windows Server 2022 runner'ında PowerShell 5.1 sözdizimi ve gerçek CurrentUser
-  DPAPI/kalıcı kuyruk smoke testi; sonuç Actions kaydında gösterilir.
+  DPAPI/kalıcı kuyruk smoke testi başarıyla geçti; [kanıt](https://github.com/beratkaratascidev/netshield-devops/actions/runs/36833438567/job/110275085133).
 - Sürüm etiketi için her iki iş başarılı olmadan yayın oluşturulmaz.
 - Kaynak ZIP ve SHA-256 özeti; imzalı Windows kurulum paketi içermez.
 - NetShield'e özel kısa AGENTS.md ve ortak kullanıcı ajanlarına geçiş rehberi.
@@ -28,5 +28,5 @@ uzun süreli gerçek ağ ve yanlış alarm ölçümleri tamamlanmadı. Windows S
 DPAPI smoke testi bu kabul listesinin yerine geçmez. Yerel denetim günlüğü
 kurcalamaya dayanıklı merkezi audit değildir.
 
-[Proje devri ve açık işler](PROJECT_HANDOFF.md) ·
-[Detaylı uygulama takibi](IMPLEMENTATION_STATUS.md)
+[Proje devri ve açık işler](https://github.com/beratkaratascidev/netshield-devops/blob/v0.1.1/docs/PROJECT_HANDOFF.md) ·
+[Detaylı uygulama takibi](https://github.com/beratkaratascidev/netshield-devops/blob/v0.1.1/docs/IMPLEMENTATION_STATUS.md)

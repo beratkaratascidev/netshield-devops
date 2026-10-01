@@ -11,8 +11,8 @@ yerel denetim günlüğü ve anahtarsız yedek/geri yükleme. Ayrıntı: README.
 ## Doğrulama
 
 Yerelde 124 Python ve 15 ortak C# testi geçti; Framework derlemesi ve gerçek
-C# → HTTPS → SQLite entegrasyonu başarılı. GitHub Actions Linux ve Windows
-depolama smoke kontrollerini her push/PR'da tekrarlar. Etiket yayınları iki işin
+C# → HTTPS → SQLite entegrasyonu başarılı. Windows Server 2022 üzerinde DPAPI ve kalıcı kuyruk smoke kontrolü de geçti.
+GitHub Actions Linux ve Windows depolama kontrollerini her push/PR'da tekrarlar. Etiket yayınları iki işin
 başarısını bekler. Windows Server runner sonucu, Windows 10/11 etkileşimli
 kabul veya servis doğrulaması olarak yorumlanmaz.
 

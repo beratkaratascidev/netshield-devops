@@ -216,3 +216,12 @@ anahtar reddedilir; mevcut etkin anahtar değişmez. `revoke` her iki anahtarı 
 kaldırır; şüpheli anahtarı acil iptal etmek için bu işlem kullanılmalıdır. Yeni bir
 geçiş oluşturmak önceki bekleyen anahtarı değiştirir. Dosya biçimi değiştiğinden
 alıcı/GUI/CLI birlikte güncellenmeli; eski okuyucu yeni geçiş kayıtlarını reddeder.
+
+### Windows depolama kabul kanıtı — 1 Ekim 2026
+
+Windows Server 2022 ve Windows PowerShell 5.1 üzerinde CurrentUser DPAPI
+şifreleme/açma, korumalı kuyruk yeniden açma ve bozulmuş durum dosyasının reddi
+[GitHub Actions üzerinde geçti](https://github.com/beratkaratascidev/netshield-devops/actions/runs/36833438567/job/110275085133). Bu, yukarıdaki önceki
+“Windows üzerinde denenmedi” notlarının yalnız depolama smoke kapsamını günceller.
+Gerçek Windows 10/11 oturumları, dizin ACL akışı, WinForms, servis, RDP, uyku ve
+kapanış testleri hâlâ ayrı kabul gerektirir.
