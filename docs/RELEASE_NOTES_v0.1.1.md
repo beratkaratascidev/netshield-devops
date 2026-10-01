@@ -7,6 +7,7 @@ Bu sürüm mevcut NetShield MVP'sinin yayın ve geliştirici iş akışını dü
 
 - GitHub Actions: Linux Python/Tk testleri, ortak C# testleri, Framework derlemesi
   ve C# → HTTPS → SQLite entegrasyonu.
+- Windows PowerShell 5.1 Add-Type derlemesindeki eksik `System.Xml` referansı düzeltildi.
 - Windows Server 2022 runner'ında PowerShell 5.1 sözdizimi ve gerçek CurrentUser
   DPAPI/kalıcı kuyruk smoke testi; sonuç Actions kaydında gösterilir.
 - Sürüm etiketi için her iki iş başarılı olmadan yayın oluşturulmaz.

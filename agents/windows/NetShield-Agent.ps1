@@ -6,7 +6,7 @@ param([string]$Config, [string]$DeviceId)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-Add-Type -Path (Join-Path $PSScriptRoot 'Core\AgentCore.cs') -ReferencedAssemblies 'System.dll','System.Core.dll','System.Net.Http.dll','System.Runtime.Serialization.dll'
+Add-Type -Path (Join-Path $PSScriptRoot 'Core\AgentCore.cs') -ReferencedAssemblies 'System.dll','System.Core.dll','System.Net.Http.dll','System.Runtime.Serialization.dll','System.Xml.dll'
 if ((-not $Config -and -not $DeviceId) -or ($Config -and $DeviceId)) {
     throw 'Use -Config to import a pairing file, or -DeviceId to use protected local state.'
 }

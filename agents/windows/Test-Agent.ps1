@@ -1,7 +1,7 @@
 #requires -Version 5.1
 # Local Windows-only smoke tests. No network, service install or machine policy changes.
 $ErrorActionPreference = 'Stop'
-Add-Type -Path (Join-Path $PSScriptRoot 'Core\AgentCore.cs') -ReferencedAssemblies 'System.dll','System.Core.dll','System.Net.Http.dll','System.Runtime.Serialization.dll'
+Add-Type -Path (Join-Path $PSScriptRoot 'Core\AgentCore.cs') -ReferencedAssemblies 'System.dll','System.Core.dll','System.Net.Http.dll','System.Runtime.Serialization.dll','System.Xml.dll'
 $directory = Join-Path ([IO.Path]::GetTempPath()) ('NetShield-Smoke-' + [Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($directory)
 $queue = $null
